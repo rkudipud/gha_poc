@@ -10,7 +10,6 @@ import time
 import resource
 import subprocess
 import filecmp
-import glob
 import os
 import shutil
 import uuid

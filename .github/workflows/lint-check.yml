@@ -12,8 +12,8 @@ on:
   push:
     paths:
       - '**.py'  # Only run when Python files are changed
-    branches-ignore:
-      - 'main'   # Skip main branch if needed
+    #branches-ignore:
+    #  - 'main'   # Skip main branch if needed
   workflow_dispatch:  # Allow manual triggering from the GitHub UI
 
 jobs:
