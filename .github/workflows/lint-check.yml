@@ -74,6 +74,8 @@ jobs:
       - name: Check for existing lint issue
         if: steps.linting.outputs.lint-result == 'fail'
         id: check-issues
+        env:
+          BRANCH_NAME: ${{ steps.branch.outputs.name }}
         uses: actions/github-script@v6
         with:
           script: |
@@ -93,12 +95,16 @@ jobs:
               return { exists: false };
             }
           result-encoding: json
-        env:
-          BRANCH_NAME: ${{ steps.branch.outputs.name }}
+        
 
       # Step 8: Update existing issue with new lint results if one exists
       - name: Update existing lint issue
         if: steps.linting.outputs.lint-result == 'fail' && fromJson(steps.check-issues.outputs.result).exists
+        env:
+            LINT_LOG: ${{ steps.lint-log.outputs.log }}
+            BRANCH_NAME: ${{ steps.branch.outputs.name }}
+            ISSUE_NUMBER: ${{ fromJson(steps.check-issues.outputs.result).issue_number }}
+            CURRENT_DATE: ${{ steps.date.outputs.date }}
         uses: actions/github-script@v6
         with:
           script: |
@@ -127,16 +133,16 @@ jobs:
               `
             });
             console.log(`Updated lint issue #${issueNumber} with new results`);
-          env:
-            LINT_LOG: ${{ steps.lint-log.outputs.log }}
-            BRANCH_NAME: ${{ steps.branch.outputs.name }}
-            ISSUE_NUMBER: ${{ fromJson(steps.check-issues.outputs.result).issue_number }}
-            CURRENT_DATE: ${{ steps.date.outputs.date }}
+          
 
       # Step 9: Create new issue if this is the first lint failure for this branch
       - name: Create new lint issue
         if: steps.linting.outputs.lint-result == 'fail' && !fromJson(steps.check-issues.outputs.result).exists
         id: create-issue
+        env:
+          LINT_LOG: ${{ steps.lint-log.outputs.log }}
+          BRANCH_NAME: ${{ steps.branch.outputs.name }}
+          CURRENT_DATE: ${{ steps.date.outputs.date }}
         uses: actions/github-script@v6
         with:
           script: |
@@ -174,14 +180,14 @@ jobs:
             console.log(`Created issue #${issue.data.number}: ${issue.data.html_url}`);
             return { issue_number: issue.data.number };
           result-encoding: json
-        env:
-          LINT_LOG: ${{ steps.lint-log.outputs.log }}
-          BRANCH_NAME: ${{ steps.branch.outputs.name }}
-          CURRENT_DATE: ${{ steps.date.outputs.date }}
+        
 
       # Step 10: Auto-close any existing issues for this branch if lint check passes
       - name: Auto-close lint issues if check passes
         if: steps.linting.outputs.lint-result == 'pass'
+        env:
+            BRANCH_NAME: ${{ steps.branch.outputs.name }}
+            CURRENT_DATE: ${{ steps.date.outputs.date }}
         uses: actions/github-script@v6
         with:
           script: |
@@ -228,9 +234,7 @@ jobs:
             } else {
               console.log(`No open lint issues to close for branch ${branchName}.`);
             }
-          env:
-            BRANCH_NAME: ${{ steps.branch.outputs.name }}
-            CURRENT_DATE: ${{ steps.date.outputs.date }}
+          
 
       # Step 11: Send success email notification if lint passes using our custom action
       - name: Send success email notification
