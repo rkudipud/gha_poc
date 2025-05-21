@@ -1,0 +1,95 @@
+name: Scheduled Full Repository Lint
+
+on:
+  schedule:
+    # Run at 00:00 every Monday
+    - cron: '0 0 * * 1'
+  # Allow manual triggering through the GitHub UI
+  workflow_dispatch:
+
+jobs:
+  full-lint:
+    name: Complete Repository Lint Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      
+      - name: Run Python Linting on entire repository
+        id: linting
+        uses: ./.github/actions/python-lint
+        with:
+          changed-only: 'false'  # Lint the entire repository
+        continue-on-error: true  # Allow workflow to continue even if linting fails
+      
+      - name: Upload lint results
+        uses: actions/upload-artifact@v3
+        with:
+          name: full-lint-results-${{ github.run_id }}
+          path: ./lint_results.log
+          retention-days: 14  # Keep results for longer for scheduled runs
+      
+      - name: Send email notification
+        if: always()  # Run this step regardless of the previous step result
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.MAIL_SERVER }}
+          server_port: ${{ secrets.MAIL_PORT }}
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "[Weekly Lint] Complete Repository Lint Report for ${{ github.repository }}"
+          body: |
+            Weekly Python Linting Results for ${{ github.repository }}
+            
+            Report Time: ${{ github.event.repository.updated_at }}
+            Status: ${{ steps.linting.outputs.lint-result == 'pass' && 'PASSED ✅' || 'FAILED ❌' }}
+            
+            This is an automated lint check of the entire codebase.
+            You can view the detailed logs in the workflow artifacts:
+            https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            
+            Repository: ${{ github.repository }}
+            Triggered by: ${{ github.event_name }}
+          to: ${{ secrets.EMAIL_RECIPIENT }}
+          from: GitHub Actions Weekly Lint <${{ secrets.MAIL_USERNAME }}>
+      
+      - name: Generate lint report
+        run: |
+          echo "# Lint Report for ${{ github.repository }}" > lint_report.md
+          echo "Generated on: $(date)" >> lint_report.md
+          echo "## Results" >> lint_report.md
+          if [ "${{ steps.linting.outputs.lint-result }}" == "pass" ]; then
+            echo "✅ **PASSED** - No linting issues found" >> lint_report.md
+          else
+            echo "❌ **FAILED** - Linting issues found" >> lint_report.md
+            echo "## Issues" >> lint_report.md
+            echo '```' >> lint_report.md
+            cat ./lint_results.log >> lint_report.md
+            echo '```' >> lint_report.md
+          fi
+      
+      - name: Upload report as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: lint-report-${{ github.run_id }}
+          path: lint_report.md
+          retention-days: 14
+      
+      # Optional: Create an issue if the lint fails
+      - name: Create issue on lint failure
+        if: steps.linting.outputs.lint-result == 'fail'
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const reportContent = fs.readFileSync('lint_report.md', 'utf8');
+            
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Weekly Lint Report - Issues Found (${new Date().toISOString().split('T')[0]})`,
+              body: reportContent,
+              labels: ['lint', 'code-quality']
+            });

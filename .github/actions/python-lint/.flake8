@@ -1,0 +1,23 @@
+[flake8]
+# Maximum allowed line length
+max-line-length = 100
+
+# Files and directories to exclude from checking
+exclude = .git,__pycache__,build,dist,venv,.venv
+
+# Error codes to ignore
+# E203: Whitespace before ':'
+# W503: Line break before binary operator
+ignore = E203, W503
+
+# Set maximum complexity allowed for functions/methods
+max-complexity = 10
+
+# Show source code for each error
+show-source = True
+
+# Count errors and warnings
+count = True
+
+# Output format for violation reports
+format = %(path)s:%(row)d:%(col)d: %(code)s %(text)s

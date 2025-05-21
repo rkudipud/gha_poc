@@ -1,0 +1,31 @@
+name: 'Email Notification'
+description: 'Sends email notifications for workflow events'
+inputs:
+  status:
+    description: 'Status of the event (success/failure)'
+    required: true
+  subject:
+    description: 'Email subject'
+    required: true
+  message:
+    description: 'Email message body'
+    required: true
+  recipients:
+    description: 'Email recipients (comma-separated)'
+    required: false
+    default: '${{ github.actor }}@github.com'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Send email
+      uses: dawidd6/action-send-mail@v3
+      with:
+        server_address: ${{ secrets.MAIL_SERVER }}
+        server_port: ${{ secrets.MAIL_PORT }}
+        username: ${{ secrets.MAIL_USERNAME }}
+        password: ${{ secrets.MAIL_PASSWORD }}
+        subject: ${{ inputs.subject }}
+        body: ${{ inputs.message }}
+        to: ${{ inputs.recipients }}
+        from: GitHub Actions <${{ secrets.MAIL_USERNAME }}>

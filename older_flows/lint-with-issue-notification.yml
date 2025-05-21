@@ -1,0 +1,141 @@
+name: Python Lint Check with Issue Notification
+
+on:
+  push:
+    paths:
+      - '**.py'  # Only run on Python file changes
+
+jobs:
+  lint:
+    name: Python Lint
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Fetch all history to properly determine changed files
+      
+      - name: Run Python Linting
+        id: linting
+        uses: ./.github/actions/python-lint
+        with:
+          changed-only: 'true'  # Only lint changed files
+        continue-on-error: true  # This allows the next steps to run even if linting fails
+      
+      - name: Upload lint results
+        uses: actions/upload-artifact@v3
+        with:
+          name: lint-results
+          path: ./lint_results.log
+          retention-days: 7
+      
+      - name: Read lint results file
+        id: lint-log
+        if: steps.linting.outputs.lint-result == 'fail'
+        run: |
+          LINT_OUTPUT=$(cat ./lint_results.log)
+          echo "log<<EOF" >> $GITHUB_OUTPUT
+          echo "$LINT_OUTPUT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      
+      - name: Create Issue for Failed Lint
+        if: steps.linting.outputs.lint-result == 'fail'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const actor = context.actor;
+            const sha = context.sha.substring(0, 7);
+            const currentTime = new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+            const pushedFiles = (process.env.CHANGED_FILES || '').split(' ').join(', ');
+            
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🔴 Lint Failure in commit ${sha} by @${actor}`,
+              body: `## Lint Failures Detected
+              
+### Commit Information
+- **Commit:** ${context.sha}
+- **Branch:** ${context.ref.replace('refs/heads/', '')}
+- **Author:** @${actor}
+- **Pushed at:** ${currentTime}
+
+### Lint Results
+\`\`\`
+${process.env.LINT_LOG}
+\`\`\`
+
+### How to fix
+1. Review the lint errors above
+2. Fix these issues in your code
+3. Push the fixes to the same branch
+4. This issue will be automatically closed when your code passes the linting check
+
+[View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+              `,
+              assignees: [actor],
+              labels: ['lint-failure', 'bug']
+            });
+            
+            console.log(`Created issue #${issue.data.number}: ${issue.data.html_url}`);
+          env:
+            LINT_LOG: ${{ steps.lint-log.outputs.log }}
+            CHANGED_FILES: ${{ toJSON(steps.linting.outputs.changed-files) }}
+      
+      - name: Auto-close lint issues if check passes
+        if: steps.linting.outputs.lint-result == 'pass'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const actor = context.actor;
+            const sha = context.sha.substring(0, 7);
+            const currentTime = '2025-05-21 10:02:51'; // Using provided current time
+            
+            // Search for open issues with the lint-failure label
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'lint-failure'
+            });
+            
+            // Close any found issues
+            for (const issue of issues.data) {
+              console.log(`Auto-closing lint issue #${issue.number}`);
+              
+              // Add a comment that the issue is fixed
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `## 🟢 Lint Issues Fixed
+                
+The lint issues have been resolved in commit [${sha}](https://github.com/${context.repo.owner}/${context.repo.repo}/commit/${context.sha}) by @${actor} on ${currentTime}.
+
+This issue is now automatically closed.
+
+[View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+                `
+              });
+              
+              // Close the issue
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed'
+              });
+            }
+            
+            if (issues.data.length > 0) {
+              console.log(`Closed ${issues.data.length} lint issue(s).`);
+            } else {
+              console.log('No open lint issues to close.');
+            }
+      
+      - name: Check linting status
+        if: steps.linting.outputs.lint-result == 'fail'
+        run: |
+          echo "Linting failed! Please fix the issues. An issue has been created and assigned to you."
+          exit 1

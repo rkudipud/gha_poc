@@ -1,0 +1,90 @@
+name: 'Python Linting Check'
+description: 'Runs flake8 linting on Python code'
+
+# Input parameters for the action
+inputs:
+  changed-only:
+    description: 'Whether to lint only changed files'
+    required: false
+    default: 'true'
+  python-version:
+    description: 'Python version to use'
+    required: false
+    default: '3.9'
+
+# Output values from the action
+outputs:
+  lint-result:
+    description: 'Result of the linting check (pass/fail)'
+    value: ${{ steps.lint.outputs.result }}
+  log-path:
+    description: 'Path to the lint log file'
+    value: './lint_results.log'
+  changed-files:
+    description: 'List of Python files that were changed'
+    value: ${{ steps.lint.outputs.changed-files }}
+
+runs:
+  using: 'composite'
+  steps:
+    # Setup Python environment
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ inputs.python-version }}
+        
+    # Install flake8 and other dependencies
+    - name: Install dependencies
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8
+        
+    # Run the actual linting process
+    - name: Run linting on changed files
+      id: lint
+      shell: bash
+      run: |
+        # Create directory for logs
+        mkdir -p ./logs
+        echo "Running flake8 on Python code..."
+        
+        # Determine if we're checking only changed files or the whole repo
+        if [[ "${{ inputs.changed-only }}" == "true" ]]; then
+          # Get list of changed Python files between the last commit and current commit
+          CHANGED_FILES=$(git diff --name-only --diff-filter=ACMRT ${{ github.event.before }} ${{ github.sha }} | grep '\.py$' || echo "")
+          
+          # If no Python files were changed, mark as passed
+          if [[ -z "$CHANGED_FILES" ]]; then
+            echo "No Python files changed in this push."
+            echo "No Python files changed" > ./lint_results.log
+            echo "result=pass" >> $GITHUB_OUTPUT
+            echo "changed-files=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "Linting changed Python files: $CHANGED_FILES"
+          echo "changed-files=$CHANGED_FILES" >> $GITHUB_OUTPUT
+          
+          # Run flake8 with the configuration from our action directory
+          flake8 $CHANGED_FILES --config=./.github/actions/python-lint/.flake8 --output-file=./lint_results.log || echo "Linting issues found"
+        else
+          # Lint entire repository
+          echo "Linting all Python files in the repository"
+          echo "changed-files=all python files" >> $GITHUB_OUTPUT
+          
+          # Run flake8 with the configuration from our action directory
+          flake8 . --config=./.github/actions/python-lint/.flake8 --output-file=./lint_results.log || echo "Linting issues found"
+        fi
+        
+        # Check if lint_results.log contains any content (indicating failures)
+        if [ -s ./lint_results.log ]; then
+          echo "Lint failed - issues found"
+          cat ./lint_results.log
+          echo "result=fail" >> $GITHUB_OUTPUT
+          exit 1
+        else
+          echo "Lint passed - no issues found"
+          echo "No issues found" > ./lint_results.log
+          echo "result=pass" >> $GITHUB_OUTPUT
+        fi
