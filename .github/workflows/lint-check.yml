@@ -49,19 +49,38 @@ jobs:
           path: ./lint_results.log
           retention-days: 7  # How long to keep the logs
 
-      # Step 5: Read lint results file (with file existence check)
-      - name: Read lint results file
+      # Step 5: Generate lint summary (count errors/warnings) instead of full log
+      - name: Generate lint summary
         id: lint-log
         if: steps.linting.outputs.lint-result == 'fail'
         run: |
           if [ -f "./lint_results.log" ]; then
-            LINT_OUTPUT=$(cat ./lint_results.log)
+            # Count number of errors and warnings
+            ERROR_COUNT=$(grep -c "error:" ./lint_results.log || echo "0")
+            WARNING_COUNT=$(grep -c "warning:" ./lint_results.log || echo "0")
+            
+            # Get first 3 errors as examples (if any)
+            SAMPLE_ERRORS=$(grep "error:" ./lint_results.log | head -n 3)
+            
+            # Create summary
+            SUMMARY="Found ${ERROR_COUNT} error(s) and ${WARNING_COUNT} warning(s) in linting."
+            
+            # Add sample errors if any were found
+            if [ "${ERROR_COUNT}" -gt "0" ]; then
+              SUMMARY="${SUMMARY}\n\nSample errors (showing first 3):\n${SAMPLE_ERRORS}\n\n..."
+            fi
+            
+            echo "summary<<EOF" >> $GITHUB_OUTPUT
+            echo -e "${SUMMARY}" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+            
+            echo "error_count=${ERROR_COUNT}" >> $GITHUB_OUTPUT
+            echo "warning_count=${WARNING_COUNT}" >> $GITHUB_OUTPUT
           else
-            LINT_OUTPUT="No lint_results.log found."
+            echo "summary=No lint_results.log found." >> $GITHUB_OUTPUT
+            echo "error_count=0" >> $GITHUB_OUTPUT
+            echo "warning_count=0" >> $GITHUB_OUTPUT
           fi
-          echo "log<<EOF" >> $GITHUB_OUTPUT
-          echo "$LINT_OUTPUT" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
 
       # Step 6: Get the current branch name
       - name: Get Branch Name
