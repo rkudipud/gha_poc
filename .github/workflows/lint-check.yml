@@ -111,20 +111,19 @@ jobs:
               repo: context.repo.repo,
               issue_number: parseInt(issueNumber),
               body: `## 🔄 New Lint Failures Detected
+              ### Updated Commit Information
+              - **Commit:** ${context.sha}
+              - **Branch:** ${branchName}
+              - **Author:** @${actor}
+              - **Pushed at:** ${currentDateTime}
 
-### Updated Commit Information
-- **Commit:** ${context.sha}
-- **Branch:** ${branchName}
-- **Author:** @${actor}
-- **Pushed at:** ${currentDateTime}
+              ### New Lint Results
+              \`\`\`
+              ${process.env.LINT_LOG}
+              \`\`\`
 
-### New Lint Results
-\`\`\`
-${process.env.LINT_LOG}
-\`\`\`
-
-[View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
-`
+              [View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+              `
             });
             console.log(`Updated lint issue #${issueNumber} with new results`);
           env:
@@ -148,26 +147,25 @@ ${process.env.LINT_LOG}
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: `🔴 Lint Failure in branch "${branchName}" by @${actor}`,
-              body: `## Lint Failures Detected
-              
-### Commit Information
-- **Commit:** ${context.sha}
-- **Branch:** ${branchName}
-- **Author:** @${actor}
-- **Pushed at:** ${currentDateTime}
+              body: `## Lint Failures Detected            
+              ### Commit Information
+              - **Commit:** ${context.sha}
+              - **Branch:** ${branchName}
+              - **Author:** @${actor}
+              - **Pushed at:** ${currentDateTime}
 
-### Lint Results
-\`\`\`
-${process.env.LINT_LOG}
-\`\`\`
+              ### Lint Results
+              \`\`\`
+              ${process.env.LINT_LOG}
+              \`\`\`
 
-### How to fix
-1. Review the lint errors above
-2. Fix these issues in your code
-3. Push the fixes to the same branch
-4. This issue will be automatically closed when your code passes the linting check
+              ### How to fix
+              1. Review the lint errors above
+              2. Fix these issues in your code
+              3. Push the fixes to the same branch
+              4. This issue will be automatically closed when your code passes the linting check
 
-[View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+              [View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
               `,
               assignees: [actor],
               labels: ['lint-failure', 'bug', `branch:${branchName}`]
@@ -190,6 +188,7 @@ ${process.env.LINT_LOG}
             const sha = context.sha.substring(0, 7);
             const branchName = process.env.BRANCH_NAME;
             const currentDateTime = process.env.CURRENT_DATE;
+
             // Search for open issues with the lint-failure label for this specific branch
             const issues = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
@@ -197,6 +196,7 @@ ${process.env.LINT_LOG}
               state: 'open',
               labels: ['lint-failure', `branch:${branchName}`]
             });
+
             // Close any found issues
             for (const issue of issues.data) {
               console.log(`Auto-closing lint issue #${issue.number} for branch ${branchName}`);
@@ -206,14 +206,14 @@ ${process.env.LINT_LOG}
                 repo: context.repo.repo,
                 issue_number: issue.number,
                 body: `## 🟢 Lint Issues Fixed
-                
-The lint issues have been resolved in commit [${sha}](https://github.com/${context.repo.owner}/${context.repo.repo}/commit/${context.sha}) by @${actor} on ${currentDateTime}.
+                The lint issues have been resolved in commit [${sha}](https://github.com/${context.repo.owner}/${context.repo.repo}/commit/${context.sha}) by @${actor} on ${currentDateTime}.
 
-This issue is now automatically closed.
+                This issue is now automatically closed.
 
-[View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+                [View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
                 `
               });
+              
               // Close the issue
               await github.rest.issues.update({
                 owner: context.repo.owner,
