@@ -51,9 +51,36 @@ jobs:
         id: lint-log
         if: steps.linting.outputs.lint-result == 'fail'
         run: |
+          # Read the lint results and format them for output
           LINT_OUTPUT=$(cat ./lint_results.log)
+          
+          # Define maximum character limit
+          MAX_CHARS=10000
+          
+          # Get the total length
+          TOTAL_LENGTH=${#LINT_OUTPUT}
+          
+          # Check if we need to truncate
+          if [ $TOTAL_LENGTH -gt $MAX_CHARS ]; then
+            # Calculate how many lines to keep for summary
+            TRUNCATED_OUTPUT=$(echo "$LINT_OUTPUT" | head -c $((MAX_CHARS - 200)))
+            
+            # Create the truncated message with note about truncation
+            FINAL_OUTPUT="${TRUNCATED_OUTPUT}
+            
+            ... Output truncated ...
+            
+            [Full results in workflow artifacts (${TOTAL_LENGTH} characters total)]"
+            
+            echo "Output truncated from ${TOTAL_LENGTH} to approximately ${MAX_CHARS} characters"
+          else
+            FINAL_OUTPUT="$LINT_OUTPUT"
+            echo "Output within character limit (${TOTAL_LENGTH} characters)"
+          fi
+          
+          # Set the output for use in other steps
           echo "log<<EOF" >> $GITHUB_OUTPUT
-          echo "$LINT_OUTPUT" >> $GITHUB_OUTPUT
+          echo "$FINAL_OUTPUT" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
       
       # Step 6: Check if there's already an open weekly lint issue
