@@ -13,7 +13,8 @@ on:
     paths:
       - '**.py'  # Only run when Python files are changed
     branches-ignore:
-      - 'main'   # Skip main branch if needed
+      - 'main'   # Skip main branch if needed  
+  workflow_dispatch:  # Allow manual triggering from the GitHub UI
 
 # Jobs to run
 jobs:
@@ -119,47 +120,10 @@ jobs:
         env:
           BRANCH_NAME: ${{ steps.branch.outputs.name }}
 
-      # Step 8: Update existing issue with new lint results if one exists
-      - name: Update existing lint issue
-        if: steps.linting.outputs.lint-result == 'fail' && fromJson(steps.check-issues.outputs.result).exists
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const actor = context.actor;
-            const sha = context.sha.substring(0, 7);
-            const branchName = process.env.BRANCH_NAME;
-            const issueNumber = process.env.ISSUE_NUMBER;
-            const currentDateTime = process.env.CURRENT_DATE;
+      # Step 8: Set up environment variables for later use
+      # This step is a comment-only placeholder, no actual commands needed
 
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: parseInt(issueNumber),
-              body: `## 🔄 New Lint Failures Detected
-
-                ### Updated Commit Information
-                - **Commit:** ${context.sha}
-                - **Branch:** ${branchName}
-                - **Author:** @${actor}
-                - **Pushed at:** ${currentDateTime}
-
-                ### New Lint Results
-                \`\`\`
-                ${process.env.LINT_LOG}
-                \`\`\`
-
-                [View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
-                `
-            });
-
-            console.log(`Updated lint issue #${issueNumber} with new results`);
-          env:
-            LINT_LOG: ${{ steps.lint-log.outputs.log }}
-            BRANCH_NAME: ${{ steps.branch.outputs.name }}
-            ISSUE_NUMBER: ${{ fromJson(steps.check-issues.outputs.result).issue_number }}
-            CURRENT_DATE: ${{ steps.date.outputs.date }}
-
-      # Step 9: Create new issue if this is the first lint failure for this branch
+      # Step 9: Create new lint issue
       - name: Create new lint issue
         if: steps.linting.outputs.lint-result == 'fail' && !fromJson(steps.check-issues.outputs.result).exists
         id: create-issue
@@ -177,25 +141,25 @@ jobs:
               title: `🔴 Lint Failure in branch "${branchName}" by @${actor}`,
               body: `## Lint Failures Detected
 
-                ### Commit Information
-                - **Commit:** ${context.sha}
-                - **Branch:** ${branchName}
-                - **Author:** @${actor}
-                - **Pushed at:** ${currentDateTime}
+### Commit Information
+- **Commit:** ${context.sha}
+- **Branch:** ${branchName}
+- **Author:** @${actor}
+- **Pushed at:** ${currentDateTime}
 
-                ### Lint Results
-                \`\`\`
-                ${process.env.LINT_LOG}
-                \`\`\`
+### Lint Results
+\`\`\`
+${process.env.LINT_LOG}
+\`\`\`
 
-                ### How to fix
-                1. Review the lint errors above
-                2. Fix these issues in your code
-                3. Push the fixes to the same branch
-                4. This issue will be automatically closed when your code passes the linting check
+### How to fix
+1. Review the lint errors above
+2. Fix these issues in your code
+3. Push the fixes to the same branch
+4. This issue will be automatically closed when your code passes the linting check
 
-                [View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
-                `,
+[View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+`,
               assignees: [actor],
               labels: ['lint-failure', 'bug', `branch:${branchName}`]
             });
@@ -237,12 +201,12 @@ jobs:
                 issue_number: issue.number,
                 body: `## 🟢 Lint Issues Fixed
 
-                  The lint issues have been resolved in commit [${sha}](https://github.com/${context.repo.owner}/${context.repo.repo}/commit/${context.sha}) by @${actor} on ${currentDateTime}.
+The lint issues have been resolved in commit [${sha}](https://github.com/${context.repo.owner}/${context.repo.repo}/commit/${context.sha}) by @${actor} on ${currentDateTime}.
 
-                  This issue is now automatically closed.
+This issue is now automatically closed.
 
-                  [View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
-                  `
+[View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+`
               });
 
               // Close the issue
