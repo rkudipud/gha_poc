@@ -1,5 +1,7 @@
 #!/usr/intel/bin/python3.10.8
 
+
+# -*- coding: utf-8 -*-
 from __future__ import print_function
 from timeit import default_timer as timer
 import argparse
