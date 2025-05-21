@@ -16,6 +16,12 @@ on:
     #  - 'main'   # Skip main branch if needed
   workflow_dispatch:  # Allow manual triggering from the GitHub UI
 
+# Add permissions for GitHub API operations
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
 jobs:
   lint:
     name: Python Lint
@@ -36,10 +42,41 @@ jobs:
       # Step 3: Run the linting action on changed files only
       - name: Run Python Linting
         id: linting
-        uses: ./.github/actions/python-lint
-        with:
-          changed-only: 'true'  # Only lint changed files
-        continue-on-error: true  # This allows the next steps to run even if linting fails
+        shell: bash
+        run: |
+          # Install linting tools
+          python -m pip install --upgrade pip
+          pip install flake8
+          
+          # Create directory for logs if needed
+          mkdir -p ./logs
+          
+          # Get list of changed Python files
+          CHANGED_FILES=$(git diff --name-only --diff-filter=ACMRT HEAD~1 HEAD | grep '\.py$' || echo "")
+          
+          # If no Python files were changed, mark as passed
+          if [[ -z "$CHANGED_FILES" ]]; then
+            echo "No Python files changed in this push."
+            echo "No Python files changed" > ./lint_results.log
+            echo "result=pass" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "Linting changed Python files: $CHANGED_FILES"
+          
+          # Run flake8 with default settings
+          flake8 $CHANGED_FILES --max-line-length=100 --output-file=./lint_results.log || true
+          
+          # Check if lint_results.log contains any content (indicating failures)
+          if [ -s ./lint_results.log ]; then
+            echo "Lint failed - issues found"
+            cat ./lint_results.log
+            echo "result=fail" >> $GITHUB_OUTPUT
+          else
+            echo "Lint passed - no issues found"
+            echo "No issues found" > ./lint_results.log
+            echo "result=pass" >> $GITHUB_OUTPUT
+          fi
 
       # Step 4: Upload lint results as an artifact for reference
       - name: Upload lint results
@@ -49,35 +86,26 @@ jobs:
           path: ./lint_results.log
           retention-days: 7  # How long to keep the logs
 
-      # Step 5: Generate lint summary (count errors/warnings) instead of full log
+      # Step 5: Generate lint summary - SIMPLIFIED
       - name: Generate lint summary
-        id: lint-log
-        if: steps.linting.outputs.lint-result == 'fail'
+        id: lint-summary
+        if: steps.linting.outputs.result == 'fail'
         run: |
           if [ -f "./lint_results.log" ]; then
             # Count number of errors and warnings
-            ERROR_COUNT=$(grep -c "error:" ./lint_results.log || echo "0")
-            WARNING_COUNT=$(grep -c "warning:" ./lint_results.log || echo "0")
+            ERROR_COUNT=$(grep -c "error" ./lint_results.log || echo "0")
+            WARNING_COUNT=$(grep -c "warning" ./lint_results.log || echo "0")
             
-            # Get first 3 errors as examples (if any)
-            SAMPLE_ERRORS=$(grep "error:" ./lint_results.log | head -n 3)
+            echo "Found ${ERROR_COUNT} error(s) and ${WARNING_COUNT} warning(s) in linting."
             
-            # Create summary
-            SUMMARY="Found ${ERROR_COUNT} error(s) and ${WARNING_COUNT} warning(s) in linting."
+            # Get sample of errors (first 10 lines)
+            SAMPLE=$(head -n 10 ./lint_results.log)
             
-            # Add sample errors if any were found
-            if [ "${ERROR_COUNT}" -gt "0" ]; then
-              SUMMARY="${SUMMARY}\n\nSample errors (showing first 3):\n${SAMPLE_ERRORS}\n\n..."
-            fi
-            
-            echo "summary<<EOF" >> $GITHUB_OUTPUT
-            echo -e "${SUMMARY}" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
-            
+            # Save the counts for later steps
             echo "error_count=${ERROR_COUNT}" >> $GITHUB_OUTPUT
             echo "warning_count=${WARNING_COUNT}" >> $GITHUB_OUTPUT
           else
-            echo "summary=No lint_results.log found." >> $GITHUB_OUTPUT
+            echo "No lint_results.log found."
             echo "error_count=0" >> $GITHUB_OUTPUT
             echo "warning_count=0" >> $GITHUB_OUTPUT
           fi
@@ -91,89 +119,68 @@ jobs:
 
       # Step 7: Check if there's already an open issue for this branch
       - name: Check for existing lint issue
-        if: steps.linting.outputs.lint-result == 'fail'
+        if: steps.linting.outputs.result == 'fail'
         id: check-issues
-        env:
-          BRANCH_NAME: ${{ steps.branch.outputs.name }}
         uses: actions/github-script@v6
         with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const branchName = process.env.BRANCH_NAME;
-            // Search for open issues with the lint-failure label for this branch
-            const issues = await github.rest.issues.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'open',
-              labels: ['lint-failure', `branch:${branchName}`]
-            });
-            if (issues.data.length > 0) {
-              console.log(`Found existing lint issue for branch ${branchName}: #${issues.data[0].number}`);
-              return { issue_number: issues.data[0].number, exists: true };
-            } else {
-              console.log(`No existing lint issue for branch ${branchName}`);
+            const branchName = context.ref.replace('refs/heads/', '');
+            
+            try {
+              // Search for open issues with the lint-failure label for this branch
+              const issues = await github.rest.issues.listForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                labels: ['lint-failure', `branch:${branchName}`]
+              });
+              
+              if (issues.data.length > 0) {
+                console.log(`Found existing lint issue for branch ${branchName}: #${issues.data[0].number}`);
+                return { issue_number: issues.data[0].number, exists: true };
+              } else {
+                console.log(`No existing lint issue for branch ${branchName}`);
+                return { exists: false };
+              }
+            } catch (error) {
+              console.error(`Error checking for existing issues: ${error.message}`);
               return { exists: false };
             }
-          result-encoding: json
-        
 
-      # Step 8: Update existing issue with new lint results if one exists
-      - name: Update existing lint issue
-        if: steps.linting.outputs.lint-result == 'fail' && fromJson(steps.check-issues.outputs.result).exists
-        env:
-            LINT_LOG: ${{ steps.lint-log.outputs.log }}
-            BRANCH_NAME: ${{ steps.branch.outputs.name }}
-            ISSUE_NUMBER: ${{ fromJson(steps.check-issues.outputs.result).issue_number }}
-            CURRENT_DATE: ${{ steps.date.outputs.date }}
+      # Step 8: Create or update issues based on lint results
+      - name: Handle lint issues
+        if: steps.linting.outputs.result == 'fail'
         uses: actions/github-script@v6
         with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            const fs = require('fs');
+            const branchName = context.ref.replace('refs/heads/', '');
             const actor = context.actor;
             const sha = context.sha.substring(0, 7);
-            const branchName = process.env.BRANCH_NAME;
-            const issueNumber = process.env.ISSUE_NUMBER;
-            const currentDateTime = process.env.CURRENT_DATE;
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: parseInt(issueNumber),
-              body: `## 🔄 New Lint Failures Detected
-              ### Updated Commit Information
-              - **Commit:** ${context.sha}
-              - **Branch:** ${branchName}
-              - **Author:** @${actor}
-              - **Pushed at:** ${currentDateTime}
+            const currentDateTime = new Date().toISOString();
+            
+            // Read the lint results file
+            let lintResults = '';
+            try {
+              lintResults = fs.readFileSync('./lint_results.log', 'utf8');
+            } catch (error) {
+              console.error(`Error reading lint results: ${error.message}`);
+              lintResults = 'Error reading lint results';
+            }
+            
+            // Check for existing issue
+            try {
+              const issues = await github.rest.issues.listForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                labels: ['lint-failure', `branch:${branchName}`]
+              });
+              
+              const issueBody = `## Lint Failures Detected
 
-              ### New Lint Results
-              \`\`\`
-              ${process.env.LINT_LOG}
-              \`\`\`
-
-              [View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
-              `
-            });
-            console.log(`Updated lint issue #${issueNumber} with new results`);
-          
-
-      # Step 9: Create new issue if this is the first lint failure for this branch
-      - name: Create new lint issue
-        if: steps.linting.outputs.lint-result == 'fail' && !fromJson(steps.check-issues.outputs.result).exists
-        id: create-issue
-        env:
-          LINT_LOG: ${{ steps.lint-log.outputs.log }}
-          BRANCH_NAME: ${{ steps.branch.outputs.name }}
-          CURRENT_DATE: ${{ steps.date.outputs.date }}
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const actor = context.actor;
-            const sha = context.sha.substring(0, 7);
-            const branchName = process.env.BRANCH_NAME;
-            const currentDateTime = process.env.CURRENT_DATE;
-            const issue = await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `🔴 Lint Failure in branch "${branchName}" by @${actor}`,
-              body: `## Lint Failures Detected            
               ### Commit Information
               - **Commit:** ${context.sha}
               - **Branch:** ${branchName}
@@ -182,7 +189,7 @@ jobs:
 
               ### Lint Results
               \`\`\`
-              ${process.env.LINT_LOG}
+              ${lintResults}
               \`\`\`
 
               ### How to fix
@@ -192,107 +199,134 @@ jobs:
               4. This issue will be automatically closed when your code passes the linting check
 
               [View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
-              `,
-              assignees: [actor],
-              labels: ['lint-failure', 'bug', `branch:${branchName}`]
-            });
-            console.log(`Created issue #${issue.data.number}: ${issue.data.html_url}`);
-            return { issue_number: issue.data.number };
-          result-encoding: json
-        
+                            `;
+                            
+                            if (issues.data.length > 0) {
+                              // Update existing issue
+                              const issueNumber = issues.data[0].number;
+                              await github.rest.issues.createComment({
+                                owner: context.repo.owner,
+                                repo: context.repo.repo,
+                                issue_number: issueNumber,
+                                body: `## 🔄 New Lint Failures Detected
+                              
+              ### Updated Commit Information
+              - **Commit:** ${context.sha}
+              - **Branch:** ${branchName}
+              - **Author:** @${actor}
+              - **Pushed at:** ${currentDateTime}
 
-      # Step 10: Auto-close any existing issues for this branch if lint check passes
+              ### Lint Results
+              \`\`\`
+              ${lintResults}
+              \`\`\`
+
+              [View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+                `
+                });
+                console.log(`Updated lint issue #${issueNumber} with new results`);
+              } else {
+                // Create new issue
+                const issue = await github.rest.issues.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  title: `🔴 Lint Failure in branch "${branchName}" by @${actor}`,
+                  body: issueBody,
+                  assignees: [actor],
+                  labels: ['lint-failure', 'bug', `branch:${branchName}`]
+                });
+                console.log(`Created issue #${issue.data.number}: ${issue.data.html_url}`);
+              }
+            } catch (error) {
+              console.error(`Error handling lint issues: ${error.message}`);
+            }
+
+      # Step 9: Auto-close any existing issues for this branch if lint check passes
       - name: Auto-close lint issues if check passes
-        if: steps.linting.outputs.lint-result == 'pass'
-        env:
-            BRANCH_NAME: ${{ steps.branch.outputs.name }}
-            CURRENT_DATE: ${{ steps.date.outputs.date }}
+        if: steps.linting.outputs.result == 'pass'
         uses: actions/github-script@v6
         with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            const branchName = context.ref.replace('refs/heads/', '');
             const actor = context.actor;
             const sha = context.sha.substring(0, 7);
-            const branchName = process.env.BRANCH_NAME;
-            const currentDateTime = process.env.CURRENT_DATE;
+            const currentDateTime = new Date().toISOString();
 
-            // Search for open issues with the lint-failure label for this specific branch
-            const issues = await github.rest.issues.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'open',
-              labels: ['lint-failure', `branch:${branchName}`]
-            });
-
-            // Close any found issues
-            for (const issue of issues.data) {
-              console.log(`Auto-closing lint issue #${issue.number} for branch ${branchName}`);
-              // Add a comment that the issue is fixed
-              await github.rest.issues.createComment({
+            try {
+              // Search for open issues with the lint-failure label for this specific branch
+              const issues = await github.rest.issues.listForRepo({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: issue.number,
-                body: `## 🟢 Lint Issues Fixed
-                The lint issues have been resolved in commit [${sha}](https://github.com/${context.repo.owner}/${context.repo.repo}/commit/${context.sha}) by @${actor} on ${currentDateTime}.
-
-                This issue is now automatically closed.
-
-                [View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
-                `
+                state: 'open',
+                labels: ['lint-failure', `branch:${branchName}`]
               });
 
-              // Close the issue
-              await github.rest.issues.update({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issue.number,
-                state: 'closed'
-              });
-            }
-            if (issues.data.length > 0) {
-              console.log(`Closed ${issues.data.length} lint issue(s) for branch ${branchName}.`);
-            } else {
-              console.log(`No open lint issues to close for branch ${branchName}.`);
-            }
-          
+              // Close any found issues
+              for (const issue of issues.data) {
+                console.log(`Auto-closing lint issue #${issue.number} for branch ${branchName}`);
+                
+                // Add a comment that the issue is fixed
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  body: `## 🟢 Lint Issues Fixed
+                  
+                  The lint issues have been resolved in commit [${sha}](https://github.com/${context.repo.owner}/${context.repo.repo}/commit/${context.sha}) by @${actor} on ${currentDateTime}.
 
-      # Step 11: Send success email notification if lint passes using our custom action
-      - name: Send success email notification
-        if: steps.linting.outputs.lint-result == 'pass'
-        uses: ./.github/actions/email-notification
+                  This issue is now automatically closed.
+
+                  [View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+                  `
+                });
+
+                // Close the issue
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  state: 'closed'
+                });
+              }
+              
+              if (issues.data.length > 0) {
+                console.log(`Closed ${issues.data.length} lint issue(s) for branch ${branchName}.`);
+              } else {
+                console.log(`No open lint issues to close for branch ${branchName}.`);
+              }
+            } catch (error) {
+              console.error(`Error closing issues: ${error.message}`);
+            }
+
+      # Step 10: Send email notification based on result
+      - name: Send email notification
+        uses: dawidd6/action-send-mail@v3
+        if: always()
+        continue-on-error: true
         with:
-          status: 'success'
-          subject: 'Lint Check Passed: Branch ${{ steps.branch.outputs.name }}'
-          message: |
-            Your recent push to branch ${{ steps.branch.outputs.name }} has passed all lint checks.
+          server_address: ${{ secrets.MAIL_SERVER }}
+          server_port: ${{ secrets.MAIL_PORT }}
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: ${{ steps.linting.outputs.result == 'pass' && '✅ Lint Check Passed' || '❌ Lint Check Failed' }}: Branch ${{ steps.branch.outputs.name }}
+          body: |
+            ${{ steps.linting.outputs.result == 'pass' && 'Your recent push has passed all lint checks.' || 'Your recent push contains linting issues that need to be fixed.' }}
             
-            Commit: ${{ github.sha }}
             Repository: ${{ github.repository }}
+            Branch: ${{ steps.branch.outputs.name }}
+            Commit: ${{ github.sha }}
             Time: ${{ steps.date.outputs.date }}
             
-            Great job keeping the code clean!
-          recipients: '${{ github.actor }}@github.com'
-
-      # Step 12: Send failure email notification if lint fails using our custom action
-      - name: Send failure email notification
-        if: steps.linting.outputs.lint-result == 'fail'
-        uses: ./.github/actions/email-notification
-        with:
-          status: 'failure'
-          subject: '❌ Lint Check Failed: Branch ${{ steps.branch.outputs.name }}'
-          message: |
-            Your recent push to branch ${{ steps.branch.outputs.name }} contains linting issues.
+            ${{ steps.linting.outputs.result == 'pass' && '🎉 Great job keeping the code clean!' || '⚠️ An issue has been created or updated with details.' }}
             
-            Commit: ${{ github.sha }}
-            Repository: ${{ github.repository }}
-            Time: ${{ steps.date.outputs.date }}
-            
-            An issue has been created/updated with details. Please fix these issues.
-            View the workflow: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          recipients: '${{ github.actor }}@github.com'
+            View workflow run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          to: ${{ github.actor }}@github.com
+          from: GitHub Actions <${{ secrets.MAIL_USERNAME }}>
 
-      # Step 13: Fail the workflow if linting failed (for CI status)
+      # Step 11: Fail the workflow if linting failed (for CI status)
       - name: Check linting status
-        if: steps.linting.outputs.lint-result == 'fail'
+        if: steps.linting.outputs.result == 'fail'
         run: |
           echo "Linting failed! Please fix the issues. An issue has been created or updated to track this."
           exit 1
