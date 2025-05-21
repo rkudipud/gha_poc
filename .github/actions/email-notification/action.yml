@@ -19,6 +19,8 @@ runs:
   using: 'composite'
   steps:
     - name: Send email
+      shell: bash
+      continue-on-error: true  # Don't fail the workflow if email sending fails
       uses: dawidd6/action-send-mail@v3
       with:
         server_address: ${{ secrets.MAIL_SERVER }}
