@@ -27,10 +27,6 @@ import sys
 import pickle
 
 
-# Global Variables
-errorVar = False
-done = False
-
 # Compiled regex for quick match
 script_path_regex = re.compile(r"Script:\s*(.*)/runs/(.*)", flags=re.I)
 script_start_regex = re.compile(r"INTEL_INFO\s*:\s*SCRIPT_START\s*:\s*(\S*)\s*", flags=re.I)
