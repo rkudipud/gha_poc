@@ -222,8 +222,8 @@ jobs:
               \`\`\`
 
               [View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
-                `
-                });
+              `
+              });
                 console.log(`Updated lint issue #${issueNumber} with new results`);
               } else {
                 // Create new issue
