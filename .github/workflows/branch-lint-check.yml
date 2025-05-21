@@ -273,6 +273,7 @@ jobs:
         with:
           status: 'success'
           subject: 'Lint Check Passed: Branch ${{ steps.branch.outputs.name }}'
+          recipients: '${{ github.actor }}@github.com'
           message: |
             Your recent push to branch ${{ steps.branch.outputs.name }} has passed all lint checks.
             
@@ -281,7 +282,7 @@ jobs:
             Time: ${{ steps.date.outputs.date }}
             
             Great job keeping the code clean!
-          recipients: '${{ github.actor }}@github.com'
+          
           
       # Step 12: Fail the workflow if linting failed (for CI status)
       - name: Check linting status
@@ -297,6 +298,7 @@ jobs:
         with:
           status: 'failure'
           subject: '❌ Lint Check Failed: Branch ${{ steps.branch.outputs.name }}'
+          recipients: '${{ github.actor }}@github.com'
           message: |
             Your recent push to branch ${{ steps.branch.outputs.name }} contains linting issues.
             
@@ -306,4 +308,4 @@ jobs:
             
             An issue has been created/updated with details. Please fix these issues.
             View the workflow: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          recipients: '${{ github.actor }}@github.com'
+          
