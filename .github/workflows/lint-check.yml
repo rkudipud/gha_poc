@@ -7,7 +7,6 @@
 
 name: Branch Lint Check
 
-# Workflow triggers
 on:
   push:
     paths:
@@ -16,85 +15,63 @@ on:
       - 'main'   # Skip main branch if needed  
   workflow_dispatch:  # Allow manual triggering from the GitHub UI
 
-# Jobs to run
 jobs:
   lint:
     name: Python Lint
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Check out the repository code - using latest v4
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Fetch all history to properly determine changed files
+          fetch-depth: 0
 
-      # Step 2: Get current date and time for use throughout the workflow
       - name: Get current date
         id: date
         run: echo "date=$(date -u +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
 
-      # Step 3: Run the linting action on changed files only
       - name: Run Python Linting
         id: linting
         uses: ./.github/actions/python-lint
         with:
-          changed-only: 'true'  # Only lint changed files
-        continue-on-error: true  # This allows the next steps to run even if linting fails
+          changed-only: 'true'
+        continue-on-error: true
 
-      # Step 4: Upload lint results as an artifact for reference
       - name: Upload lint results
         uses: actions/upload-artifact@v3
         with:
           name: lint-results-${{ github.ref_name }}
           path: ./lint_results.log
-          retention-days: 7  # How long to keep the logs
+          retention-days: 7
 
-      # Step 5: Read the lint results file if linting failed
       - name: Read lint results file
         id: lint-log
         if: steps.linting.outputs.lint-result == 'fail'
         run: |
-          # Read the lint results and format them for output
           LINT_OUTPUT=$(cat ./lint_results.log)
-
-          # Define maximum character limit
           MAX_CHARS=10000
-
-          # Get the total length
           TOTAL_LENGTH=${#LINT_OUTPUT}
-
-          # Check if we need to truncate
           if [ $TOTAL_LENGTH -gt $MAX_CHARS ]; then
-            # Calculate how many lines to keep for summary
             TRUNCATED_OUTPUT=$(echo "$LINT_OUTPUT" | head -c $((MAX_CHARS - 200)))
-
-            # Create the truncated message with note about truncation
             FINAL_OUTPUT="${TRUNCATED_OUTPUT}
+... Output truncated ...
 
-            ... Output truncated ...
-
-            [Full results in workflow artifacts (${TOTAL_LENGTH} characters total)]"
-
+[Full results in workflow artifacts (${TOTAL_LENGTH} characters total)]"
             echo "Output truncated from ${TOTAL_LENGTH} to approximately ${MAX_CHARS} characters"
           else
             FINAL_OUTPUT="$LINT_OUTPUT"
             echo "Output within character limit (${TOTAL_LENGTH} characters)"
           fi
-
-          # Set the output for use in other steps
           echo "log<<EOF" >> $GITHUB_OUTPUT
           echo "$FINAL_OUTPUT" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      # Step 6: Get the current branch name
       - name: Get Branch Name
         id: branch
         run: |
           BRANCH_NAME="${GITHUB_REF#refs/heads/}"
           echo "name=$BRANCH_NAME" >> $GITHUB_OUTPUT
 
-      # Step 7: Check if there's already an open issue for this branch
       - name: Check for existing lint issue
         if: steps.linting.outputs.lint-result == 'fail'
         id: check-issues
@@ -102,7 +79,6 @@ jobs:
         with:
           script: |
             const branchName = process.env.BRANCH_NAME;
-            // Search for open issues with the lint-failure label for this branch
             const issues = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -120,10 +96,8 @@ jobs:
         env:
           BRANCH_NAME: ${{ steps.branch.outputs.name }}
 
-      # Step 8: Set up environment variables for later use
-      # This step is a comment-only placeholder, no actual commands needed
+      # Placeholder for env step if needed
 
-      # Step 9: Create new lint issue
       - name: Create new lint issue
         if: steps.linting.outputs.lint-result == 'fail' && !fromJson(steps.check-issues.outputs.result).exists
         id: create-issue
@@ -134,7 +108,6 @@ jobs:
             const sha = context.sha.substring(0, 7);
             const branchName = process.env.BRANCH_NAME;
             const currentDateTime = process.env.CURRENT_DATE;
-
             const issue = await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -171,7 +144,6 @@ ${process.env.LINT_LOG}
           BRANCH_NAME: ${{ steps.branch.outputs.name }}
           CURRENT_DATE: ${{ steps.date.outputs.date }}
 
-      # Step 10: Auto-close any existing issues for this branch if lint check passes
       - name: Auto-close lint issues if check passes
         if: steps.linting.outputs.lint-result == 'pass'
         uses: actions/github-script@v6
@@ -181,20 +153,14 @@ ${process.env.LINT_LOG}
             const sha = context.sha.substring(0, 7);
             const branchName = process.env.BRANCH_NAME;
             const currentDateTime = process.env.CURRENT_DATE;
-
-            // Search for open issues with the lint-failure label for this specific branch
             const issues = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
               state: 'open',
               labels: ['lint-failure', `branch:${branchName}`]
             });
-
-            // Close any found issues
             for (const issue of issues.data) {
               console.log(`Auto-closing lint issue #${issue.number} for branch ${branchName}`);
-
-              // Add a comment that the issue is fixed
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -208,8 +174,6 @@ This issue is now automatically closed.
 [View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
 `
               });
-
-              // Close the issue
               await github.rest.issues.update({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -217,7 +181,6 @@ This issue is now automatically closed.
                 state: 'closed'
               });
             }
-
             if (issues.data.length > 0) {
               console.log(`Closed ${issues.data.length} lint issue(s) for branch ${branchName}.`);
             } else {
@@ -227,7 +190,6 @@ This issue is now automatically closed.
             BRANCH_NAME: ${{ steps.branch.outputs.name }}
             CURRENT_DATE: ${{ steps.date.outputs.date }}
 
-      # Step 11: Send success email notification if lint passes using our custom action
       - name: Send success email notification
         if: steps.linting.outputs.lint-result == 'pass'
         uses: ./.github/actions/email-notification
@@ -244,14 +206,12 @@ This issue is now automatically closed.
 
             Great job keeping the code clean!
 
-      # Step 12: Fail the workflow if linting failed (for CI status)
       - name: Check linting status
         if: steps.linting.outputs.lint-result == 'fail'
         run: |
           echo "Linting failed! Please fix the issues. An issue has been created or updated to track this."
           exit 1
 
-      # Step 13: Send failure email notification if lint fails using our custom action
       - name: Send failure email notification
         if: steps.linting.outputs.lint-result == 'fail'
         uses: ./.github/actions/email-notification
