@@ -272,7 +272,6 @@ jobs:
                   repo: context.repo.repo,
                   issue_number: issue.number,
                   body: `## 🟢 Lint Issues Fixed
-                  
                   The lint issues have been resolved in commit [${sha}](https://github.com/${context.repo.owner}/${context.repo.repo}/commit/${context.sha}) by @${actor} on ${currentDateTime}.
 
                   This issue is now automatically closed.
