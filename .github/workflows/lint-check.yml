@@ -305,7 +305,7 @@ jobs:
           server_port: ${{ secrets.MAIL_PORT }}
           username: ${{ secrets.MAIL_USERNAME }}
           password: ${{ secrets.MAIL_PASSWORD }}
-          subject: ${{ needs.lint.outputs.lint_result == 'pass' && '✅ Lint Check Passed' || '❌ Lint Check Failed' }}: Branch ${{ needs.lint.outputs.branch_name }}
+          subject: "${{ needs.lint.outputs.lint_result == 'pass' && '✅ Lint Check Passed' || '❌ Lint Check Failed' }}: Branch ${{ needs.lint.outputs.branch_name }}"
           body: |
             ${{ needs.lint.outputs.lint_result == 'pass' && 'Your recent push has passed all lint checks!' || 'Your recent push contains linting issues that need to be fixed.' }}
 
