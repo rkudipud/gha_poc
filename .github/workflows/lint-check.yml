@@ -18,6 +18,12 @@ name: Branch Lint Check
 
 on:
   push:
+    # Uncomment to only run on Python file changes:
+    # paths:
+    #   - '**.py'
+    # Uncomment to skip main branch:
+    # branches-ignore:
+    #   - 'main'
   workflow_dispatch:
 
 permissions:
@@ -191,19 +197,19 @@ jobs:
               issue_number: firstIssueNumber,
               body: `## 🔄 New Lint Failures Detected
 
-### Updated Commit Information
-- **Commit:** ${context.sha}
-- **Branch:** ${branchName}
-- **Author:** @${actor}
-- **Pushed at:** ${currentDateTime}
+            ### Updated Commit Information
+            - **Commit:** ${context.sha}
+            - **Branch:** ${branchName}
+            - **Author:** @${actor}
+            - **Pushed at:** ${currentDateTime}
 
-### Lint Results
-\`\`\`
-${lintResults}
-\`\`\`
+            ### Lint Results
+            \`\`\`
+            ${lintResults}
+            \`\`\`
 
-[View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
-              `,
+            [View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+            `);  `,
             });
 
       # Step 3b: If lint is FAIL and no issues exist, create a new lint issue
@@ -225,26 +231,26 @@ ${lintResults}
               lintResults = 'Error reading lint_results.log';
             }
             const issueBody = `<!-- LINT-BOT-ISSUE -->
-## Lint Failures Detected
+            ## Lint Failures Detected
 
-### Commit Information
-- **Commit:** ${context.sha}
-- **Branch:** ${branchName}
-- **Author:** @${actor}
-- **Pushed at:** ${currentDateTime}
+            ### Commit Information
+            - **Commit:** ${context.sha}
+            - **Branch:** ${branchName}
+            - **Author:** @${actor}
+            - **Pushed at:** ${currentDateTime}
 
-### Lint Results
-\`\`\`
-${lintResults}
-\`\`\`
+            ### Lint Results
+            \`\`\`
+            ${lintResults}
+            \`\`\`
 
-### How to fix
-1. Review the lint errors above
-2. Fix these issues in your code
-3. Push the fixes to the same branch
-4. This issue will be automatically closed when your code passes the linting check
+            ### How to fix
+            1. Review the lint errors above
+            2. Fix these issues in your code
+            3. Push the fixes to the same branch
+            4. This issue will be automatically closed when your code passes the linting check
 
-[View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+            [View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
             `;
             await github.rest.issues.create({
               owner: context.repo.owner,
@@ -274,11 +280,11 @@ ${lintResults}
                 issue_number: Number(issueNumber),
                 body: `## 🟢 Lint Issues Fixed
 
-The lint issues have been resolved in commit [${sha}](https://github.com/${context.repo.owner}/${context.repo.repo}/commit/${context.sha}) by @${actor} on ${currentDateTime}.
+                The lint issues have been resolved in commit [${sha}](https://github.com/${context.repo.owner}/${context.repo.repo}/commit/${context.sha}) by @${actor} on ${currentDateTime}.
 
-This issue is now automatically closed.
+                This issue is now automatically closed.
 
-[View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+                [View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
                 `,
               });
               await github.rest.issues.update({
