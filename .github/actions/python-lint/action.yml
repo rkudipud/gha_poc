@@ -10,13 +10,13 @@ inputs:
   python-version:
     description: 'Python version to use'
     required: false
-    default: '3.9'
+    default: '3.11.1'
 
 # Output values from the action
 outputs:
   lint-result:
     description: 'Result of the linting check (pass/fail)'
-    value: ${{ steps.lint.outputs.result }}
+    value: ${{ steps.lint.outputs.lint-result }}
   log-path:
     description: 'Path to the lint log file'
     value: './lint_results.log'
@@ -58,8 +58,8 @@ runs:
           if [[ -z "$CHANGED_FILES" ]]; then
             echo "No Python files changed in this push."
             echo "No Python files changed" > ./lint_results.log
-            echo "result=pass" >> $GITHUB_OUTPUT
-            echo "changed-files=" >> $GITHUB_OUTPUT
+            echo "lint-result=pass" >> $GITHUB_OUTPUT
+            echo "changed-files=None" >> $GITHUB_OUTPUT
             exit 0
           fi
           
@@ -81,7 +81,7 @@ runs:
         if [ -s ./lint_results.log ]; then
           echo "Lint failed - issues found"
           cat ./lint_results.log
-          echo "result=fail" >> $GITHUB_OUTPUT
+          echo "lint-result=fail" >> $GITHUB_OUTPUT
           exit 1
         else
           echo "Lint passed - no issues found"

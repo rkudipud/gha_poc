@@ -1,0 +1,206 @@
+# ===================================================================
+# Weekly Full Repository Lint Check Workflow
+# -------------------------------------------------------------------
+# Runs every Monday to check the entire repository for lint issues
+# Creates or updates a single issue for tracking
+# ===================================================================
+
+name: Weekly Full Repository Lint Check
+
+# Workflow triggers
+on:
+  schedule:
+    # Run at 00:00 UTC every Monday
+    - cron: '0 0 * * 1'
+  workflow_dispatch:  # Allow manual triggering from the GitHub UI
+
+# Add permissions for GitHub API operations
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  lint-full-repo:
+    name: Full Repository Lint Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Step 1: Check out the repository code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      # Step 2: Get current date and time
+      - name: Get current date
+        id: date
+        run: echo "date=$(date -u +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
+      
+      # Step 3: Run linting on the entire repository
+      - name: Run Full Repository Linting
+        id: linting
+        shell: bash
+        run: |
+          # Install linting tools
+          python -m pip install --upgrade pip
+          pip install flake8
+          
+          echo "Linting all Python files in the repository"
+          
+          # Run flake8 on all Python files
+          flake8 . --max-line-length=100 --output-file=./lint_results.log || true
+          
+          # Check if lint_results.log contains any content (indicating failures)
+          if [ -s ./lint_results.log ]; then
+            echo "Lint failed - issues found"
+            cat ./lint_results.log
+            echo "result=fail" >> $GITHUB_OUTPUT
+          else
+            echo "Lint passed - no issues found"
+            echo "No issues found" > ./lint_results.log
+            echo "result=pass" >> $GITHUB_OUTPUT
+          fi
+      
+      # Step 4: Upload lint results as an artifact
+      - name: Upload lint results
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-lint-results-${{ github.run_id }}
+          path: ./lint_results.log
+          retention-days: 14
+      
+      # Step 5: Handle weekly lint issues
+      - name: Handle weekly lint issues
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const currentDateTime = new Date().toISOString();
+            
+            // Read the lint results file
+            let lintResults = '';
+            try {
+              lintResults = fs.readFileSync('./lint_results.log', 'utf8');
+            } catch (error) {
+              console.error(`Error reading lint results: ${error.message}`);
+              lintResults = 'Error reading lint results';
+            }
+            
+            // Get linting result
+            const lintResult = process.env.LINT_RESULT || 'unknown';
+            
+            try {
+              // Search for open issues with the weekly-lint-check label
+              const issues = await github.rest.issues.listForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                labels: ['weekly-lint-check']
+              });
+              
+              if (lintResult === 'fail') {
+                const issueBody = `## Weekly Lint Failures Detected
+                ### Weekly Repository Health Check
+
+                The scheduled weekly lint check has found code quality issues in the repository.
+
+                ### Lint Results
+                \`\`\`
+                ${lintResults}
+                \`\`\`
+
+                ### Recommendation
+                Please address these issues to maintain code quality standards across the repository.
+
+                [View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+                `;
+                
+                if (issues.data.length > 0) {
+                  // Update existing issue
+                  const issueNumber = issues.data[0].number;
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issueNumber,
+                    body: `## 🔄 Weekly Lint Failures (${currentDateTime})
+                    
+                    ### Weekly scan found lint issues
+
+                    \`\`\`
+                    ${lintResults}
+                    \`\`\`
+
+                    Please address these issues to maintain code quality.
+
+                    [View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+                                        `
+                                      });
+                                      console.log(`Updated weekly lint issue #${issueNumber} with new results`);
+                                    } else {
+                                      // Create new issue
+                                      const issue = await github.rest.issues.create({
+                                        owner: context.repo.owner,
+                                        repo: context.repo.repo,
+                                        title: `📋 Weekly Repository Lint Issues (${currentDateTime})`,
+                                        body: issueBody,
+                                        assignees: ['rkudipud'],
+                                        labels: ['weekly-lint-check', 'maintenance']
+                                      });
+                                      console.log(`Created weekly lint issue #${issue.data.number}`);
+                                    }
+                                  } else if (lintResult === 'pass') {
+                                    // Close any open issues if lint passed
+                                    for (const issue of issues.data) {
+                                      await github.rest.issues.createComment({
+                                        owner: context.repo.owner,
+                                        repo: context.repo.repo,
+                                        issue_number: issue.number,
+                                        body: `## 🟢 All Lint Issues Resolved (${currentDateTime})
+                                        
+                    The weekly repository lint check has passed. All identified issues have been resolved.
+
+                    Great job maintaining code quality!
+
+                    [View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+                    `
+                  });
+                  
+                  await github.rest.issues.update({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issue.number,
+                    state: 'closed'
+                  });
+                  
+                  console.log(`Closed lint issue #${issue.number}`);
+                }
+              }
+            } catch (error) {
+              console.error(`Error handling weekly lint issues: ${error.message}`);
+            }
+          env:
+            LINT_RESULT: ${{ steps.linting.outputs.result }}
+      
+      # Step 6: Send weekly report email
+      - name: Send weekly report email
+        if: always()
+        continue-on-error: true
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.MAIL_SERVER }}
+          server_port: ${{ secrets.MAIL_PORT }}
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "Weekly Repository Lint Report - ${{ steps.linting.outputs.result == 'pass' && 'PASSED ✅' || 'FAILED ❌' }}"
+          body: |
+            ## Weekly Repository Lint Report
+            
+            Date: ${{ steps.date.outputs.date }}
+            Repository: ${{ github.repository }}
+            Status: ${{ steps.linting.outputs.result == 'pass' && 'PASSED ✅' || 'FAILED ❌' }}
+            
+            ${{ steps.linting.outputs.result == 'pass' && '🎉 All code in the repository passes linting standards!' || '⚠️ Linting issues were found in the repository. An issue has been created or updated on GitHub with details.' }}
+            
+            You can view the detailed logs in the workflow artifacts:
+            https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          to: rkudipud@github.com
+          from: GitHub Actions Weekly Report <${{ secrets.MAIL_USERNAME }}>
