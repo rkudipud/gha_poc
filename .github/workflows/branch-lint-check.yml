@@ -49,6 +49,10 @@ jobs:
       lint_result: ${{ steps.linting.outputs.lint-result }}
       # Pass the branch name to the next job.
       branch_name: ${{ steps.branch.outputs.name }}
+      lint_summary_error_count: ${{ steps.lint-summary.outputs.error_count }}
+      lint_summary_warning_count: ${{ steps.lint-summary.outputs.warning_count }}
+      lint_summary_sample: ${{ steps.lint-summary.outputs.sample }}
+
 
     steps:
       # A: Cache pip dependencies to speed up future runs.
@@ -190,9 +194,9 @@ jobs:
             } catch (error) {
               lintResults = 'Error reading lint_results.log';
             }
-            const errorCount = "${{ steps.lint-summary.outputs.error_count }}";
-            const warningCount = "${{ steps.lint-summary.outputs.warning_count }}";
-            const sample = "${{ steps.lint-summary.outputs.sample }}";
+            const errorCount = "${{ needs.lint.outputs.lint_summary_error_count }}";
+            const warningCount = "${{ needs.lint.outputs.lint_summary_warning_count }}";
+            const sample = "${{ needs.lint.outputs.lint_summary_sample }}";
             const commentBody = `## 🔄 New Lint Failures Detected
 
             ### Updated Commit Information
@@ -242,9 +246,9 @@ jobs:
             } catch (error) {
               lintResults = 'Error reading lint_results.log';
             }
-            const errorCount = "${{ steps.lint-summary.outputs.error_count }}";
-            const warningCount = "${{ steps.lint-summary.outputs.warning_count }}";
-            const sample = "${{ steps.lint-summary.outputs.sample }}";
+            const errorCount = "${{ needs.lint.outputs.lint_summary_error_count }}";
+            const warningCount = "${{ needs.lint.outputs.lint_summary_warning_count }}";
+            const sample = "${{ needs.lint.outputs.lint_summary_sample }}";
             const issueBody = `<!-- LINT-BOT-ISSUE -->
             ## Lint Failures Detected
 
