@@ -89,8 +89,13 @@ jobs:
             echo "python_files_changed=true"
             echo "python_files_changed=true" >> $GITHUB_OUTPUT
           else
-            echo "python_files_changed=false"
-            echo "python_files_changed=false" >> $GITHUB_OUTPUT
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+                echo "python_files_changed=true (manual run, assuming all files changed)"
+                echo "python_files_changed=true" >> $GITHUB_OUTPUT
+            else
+                echo "python_files_changed=false (no Python files changed)"
+                echo "python_files_changed=false" >> $GITHUB_OUTPUT
+            fi
           fi
 
       # 3. Get current date and time (UTC).
