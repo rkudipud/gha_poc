@@ -189,7 +189,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const core = require('@actions/core');
+            // const core = require('@actions/core');
             const branchName = "${{ needs.lint.outputs.branch_name }}";
             // Fetch all open issues with labels "lint-failure" and "branch:<branchName>"
             const issues = await github.rest.issues.listForRepo({
