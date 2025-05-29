@@ -3,39 +3,35 @@
 #   group: branch-lint-check-${{ github.ref_name }}
 #   cancel-in-progress: true
 
-# ===================================================================
+# ==============================================================================
 # Branch Lint Check Workflow
-# -------------------------------------------------------------------
-# This workflow is split into two jobs:
-#  1) "lint" job:
-#     - Caches and installs pip dependencies.
-#     - Checks out the repository.
-#     - Runs the composite Python linting action (.github/actions/python-lint)
-#       which:
-#         a) Determines if any Python files have changed (or lints all files if not).
-#         b) Runs flake8 in verbose mode to generate a full lint report.
-#         c) Runs flake8 with --statistics for a concise summary report.
-#         d) Sets outputs: lint-result, log-path (verbose log), stats-log-path (stats log),
-#            and changed-files.
-#     - Uploads the lint logs as artifacts.
-#     - Extracts the branch name.
-#     - Fails the job if linting fails (so CI shows the failure).
+# ==============================================================================
+# Description:
+# (2) "lint" job:
+#     (a) Cache and install pip dependencies.
+#     (b) Checkout the repository.
+#     (c) Check for changed Python files.
+#     (d) Set a flag to lint only changed files or all files.
+#     (e) Run the composite Python linting action which:
+#         - Determines if any Python files have changed (or lints all files if not).
+#         - Runs flake8 in verbose mode to generate a detailed lint report.
+#         - Runs flake8 with --statistics for a concise summary report.
+#         - Sets outputs: lint-result, log-path, stats-log-path, and changed-files.
+#     (f) Upload lint artifacts.
+#     (g) Extract the branch name.
+#     (h) Set the overall lint result for downstream jobs.
+#     (i) Fail the job if linting fails (to mark CI as failed).
 #
-#  2) "issue-management" job:
-#     - Always runs irrespective of the lint job outcome.
-#     - Checks out the repository.
-#     - Determines if there are open lint issues for this branch.
-#     - If lint fails and a matching issue is found, updates the issue.
-#     - If lint fails and no matching issue is found, creates a new lint issue.
-#     - If lint passes (and there are existing issues) AND linting ran (i.e. was not skipped),
-#       then closes those issues.
-#     - Sends an email with a summary showing a concise status (passed, failed, or skipped)
-#       along with a brief explanation.
-#     - Appends a brief summary to the GitHub Actions job summary.
-#
-# NOTE: Do NOT remove any steps. Each step is crucial.
-# The composite action ".github/actions/python-lint" encapsulates all the linting logic,
-# so the main workflow only needs to call it.
+# (3) "issue-management" job:
+#     (a) Checkout the repository.
+#     (b) Conditionally download lint artifacts (only if linting did not skip).
+#     (c) Find open lint issues for the branch.
+#     (d) Update an existing lint issue if linting failed.
+#     (e) Create a new lint issue if none exists and linting failed.
+#     (f) Close lint issues if linting passed.
+#     (g) Send an email notification summarizing the lint outcome.
+#     (h) Append a final workflow summary to the GitHub Actions run summary.
+
 name: Branch Lint Check
 
 on:
@@ -216,14 +212,15 @@ jobs:
 
       # -------------------------------------------------------------------------
       # Step 2: Download lint artifacts.
-      #         Downloads artifacts generated in the lint job (e.g., log files).
+      #         Downloads artifacts generated in the lint job, but only if linting wasn't skipped.
       # -------------------------------------------------------------------------
       - name: Download lint artifacts
+        if: ${{ needs.lint.outputs.lint-result != 'skipped' }}
         uses: actions/download-artifact@v4
         with:
           name: lint-artifacts-${{ needs.lint.outputs.branch-name }}
           path: ./  # Artifacts are downloaded to the current directory.
-        # [2] Makes the generated log files available for reading.
+        # [2] Makes the generated log files available for reading only when available.
 
       # -------------------------------------------------------------------------
       # Step 3: Find all open lint issues for this branch.
@@ -378,12 +375,13 @@ jobs:
 
       # -------------------------------------------------------------------------
       # Step 6: Close existing lint issues if linting passed.
-      #         Comment on and close any existing lint issues.
+      #         Comments on and closes any existing lint issues.
       # -------------------------------------------------------------------------
       - name: Close lint issues if lint passes
         if: ${{ success() && (needs.lint.outputs.lint-result == 'pass') && (steps.find-lint-issues.outputs.exists == 'true') }}
         uses: actions/github-script@v6
         with:
+          github-token: ${{ secrets.MAIL_USERNAME }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             //const core = require('@actions/core');
@@ -450,11 +448,11 @@ jobs:
             Time: ${{ steps.date.outputs.date || '(No date available)' }}
 
             [ View workflow run ](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
-        # [7] Email notification for stakeholders regarding the lint outcome.
+        # [7] Notifies relevant parties via email of the lint result.
 
       # -------------------------------------------------------------------------
       # Step 8: Append workflow summary.
-      #         Adds a final concise summary to the GitHub Actions summary section.
+      #         Adds a final concise summary to the GitHub Actions run summary section.
       # -------------------------------------------------------------------------
       - name: Add workflow summary
         if: always()
