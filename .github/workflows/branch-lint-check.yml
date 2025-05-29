@@ -381,7 +381,6 @@ jobs:
         if: ${{ success() && (needs.lint.outputs.lint-result == 'pass') && (steps.find-lint-issues.outputs.exists == 'true') }}
         uses: actions/github-script@v6
         with:
-          github-token: ${{ secrets.MAIL_USERNAME }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             //const core = require('@actions/core');
