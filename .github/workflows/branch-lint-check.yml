@@ -13,9 +13,11 @@
 #     - Determines if any Python files have changed.
 #         If no Python files have been changed (e.g. only a workflow file was updated),
 #         then the linting is skipped.
+#         A bypass is added for workflow_dispatch events: when manually triggered,
+#         the step assumes all files have changed.
 #     - Gets the current datetime for logs.
 #     - Sets a flag to lint only changed files (for push) or all files (for manual run).
-#     - Runs the composite Python lint action (using flake8), unless skipped.
+#     - Conditionally runs the composite Python lint action (using flake8), unless skipped.
 #     - Uploads the lint results log as an artifact.
 #     - Generates a lint summary (error count, warning count, and sample) if linting fails.
 #     - Extracts the branch name.
@@ -26,8 +28,8 @@
 #     - Determines if there are open lint issues for this branch.
 #     - If lint fails and a matching issue is found, updates the issue.
 #     - If lint fails and no matching issue is found, creates a new lint issue.
-#     - If lint passes (and there are existing issues) and linting ran (i.e. was not skipped),
-#       closes those issues.
+#     - If lint passes (and there are existing issues) AND linting ran (i.e. was not skipped),
+#       then closes those issues.
 #     - Sends an email with a summary.
 #     - Appends a summary to the GitHub Actions job summary.
 # NOTE: Do NOT remove any steps. Each step is crucial.
@@ -75,9 +77,10 @@ jobs:
         with:
           fetch-depth: ${{ github.event_name == 'push' && 2 || 0 }}
 
-      # 2.1 Check for changed Python files.
-      # This step performs a git diff between the current commit and the previous commit.
+      # 3. Check for changed Python files.
+      # This step performs a git diff between HEAD~1 and HEAD.
       # If no Python (.py) files are detected, it sets the output "python_files_changed" to "false".
+      # For workflow_dispatch events, assume all files have changed.
       - name: Check for changed Python files
         id: changed-files
         run: |
@@ -97,13 +100,13 @@ jobs:
                 echo "python_files_changed=false" >> $GITHUB_OUTPUT
             fi
           fi
-
-      # 3. Get current date and time (UTC).
+          
+      # 4. Get current date and time (UTC) for logging.
       - name: Get current date
         id: date
         run: echo "date=$(date -u +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
 
-      # 4. Set flag to lint only changed files or all files.
+      # 5. Set flag to lint only changed files or all files.
       - name: Set changed-only flag
         id: lint_mode
         run: |
@@ -113,8 +116,8 @@ jobs:
             echo "changed_only=true" >> $GITHUB_OUTPUT
           fi
 
-      # 5. Conditionally run the Python lint action.
-      # If there are no changed Python files (python_files_changed=false), then set the lint result to "skipped".
+      # 6. Conditionally run the Python lint action.
+      # If there are changed Python files, run the lint action.
       - name: Run Python Linting
         id: linting
         if: steps.changed-files.outputs.python_files_changed == 'true'
@@ -123,7 +126,7 @@ jobs:
           changed-only: ${{ steps.lint_mode.outputs.changed_only }}
         continue-on-error: true
 
-      # 5.1 If no Python files were changed, create a dummy output.
+      # 7. If no Python files were changed, bypass linting and set dummy output.
       - name: Skip Python Linting
         id: skip-linting
         if: steps.changed-files.outputs.python_files_changed == 'false'
@@ -131,7 +134,7 @@ jobs:
           echo "No Python files changed. Skipping linting."
           echo "lint-result=skipped" >> $GITHUB_OUTPUT
 
-      # 6. Upload the lint results log as an artifact.
+      # 8. Upload the lint results log as an artifact.
       - name: Upload lint results
         uses: actions/upload-artifact@v4
         with:
@@ -139,7 +142,7 @@ jobs:
           path: ./lint_results.log
           retention-days: 7
 
-      # 7. Generate lint summary if linting fails.
+      # 9. Generate lint summary if linting failed.
       - name: Generate lint summary
         id: lint-summary
         if: steps.linting.outputs.lint-result == 'fail'
@@ -159,14 +162,14 @@ jobs:
             echo "sample=" >> $GITHUB_OUTPUT
           fi
 
-      # 8. Extract the branch name from the Git reference.
+      # 10. Extract the branch name from the Git reference.
       - name: Get Branch Name
         id: branch
         run: |
           BRANCH_NAME="${GITHUB_REF#refs/heads/}"
           echo "name=$BRANCH_NAME" >> $GITHUB_OUTPUT
 
-      # 9. Fail the job if linting fails (for CI visibility).
+      # 11. Fail the job if linting failed (for CI visibility).
       - name: Check linting status
         if: steps.linting.outputs.lint-result == 'fail'
         run: |
@@ -176,9 +179,9 @@ jobs:
   issue-management:
     name: Issue Management
     runs-on: ubuntu-latest
-    needs: [lint]  # Runs after the lint job.
+    needs: [lint]  # This job runs after the lint job completes.
     timeout-minutes: 10  # Limit the job runtime.
-    if: always()  # Always run regardless of lint outcome.
+    if: always()  # Always run regardless of lint job outcome.
     steps:
       # 1. Checkout repository.
       - name: Checkout repository
@@ -194,7 +197,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            // const core = require('@actions/core');
+            //const core = require('@actions/core');
             const branchName = "${{ needs.lint.outputs.branch_name }}";
             // Fetch all open issues with labels "lint-failure" and "branch:<branchName>"
             const issues = await github.rest.issues.listForRepo({
@@ -212,7 +215,12 @@ jobs:
             const exists = matchingIssues.length > 0 ? 'true' : 'false';
             core.setOutput('issue_numbers', issueNumbers);
             core.setOutput('exists', exists);
+            return {
+              issue_numbers: issueNumbers,
+              exists: exists
+            };
 
+      # 3. Issue Management Steps:
       # 3a. If lint fails and matching issues exist, update the first issue.
       - name: Update existing lint issue
         if: ${{ success() && (needs.lint.outputs.lint_result == 'fail') && (steps.find-lint-issues.outputs.exists == 'true') }}
