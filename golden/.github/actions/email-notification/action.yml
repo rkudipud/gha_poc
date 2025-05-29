@@ -1,0 +1,44 @@
+name: 'Email Notification'
+description: 'Sends email notifications for workflow events'
+
+inputs:
+  status:
+    description: 'Status of the event (success/failure)'
+    required: true
+  subject:
+    description: 'Email subject'
+    required: true
+  message:
+    description: 'Email message body'
+    required: true
+  recipients:
+    description: 'Email recipients (comma-separated)'
+    required: false
+    default: '${{ github.actor }}@github.com'
+
+runs:
+  using: 'composite'
+  steps:
+    # This step sends an email using the dawidd6/action-send-mail action.
+    # It uses email server settings from repository secrets.
+    # The subject, message, and recipients come from the inputs above.
+    # The step never fails your job if sending the email fails (continue-on-error: true).
+    - name: Send email
+      uses: dawidd6/action-send-mail@v3
+      with:
+        server_address: ${{ secrets.MAIL_SERVER }}   # SMTP server address (set in your repo secrets)
+        server_port: ${{ secrets.MAIL_PORT }}        # SMTP server port (set in your repo secrets)
+        username: ${{ secrets.MAIL_USERNAME }}       # SMTP username (set in your repo secrets)
+        password: ${{ secrets.MAIL_PASSWORD }}       # SMTP password (set in your repo secrets)
+        subject: ${{ inputs.subject }}               # The subject line for the email
+        body: ${{ inputs.message }}                  # The main content of the email
+        to: ${{ inputs.recipients }}                 # Who should receive the email
+        from: GitHub Actions <${{ secrets.MAIL_USERNAME }}> # "From" address so it shows as GitHub Actions
+      continue-on-error: true  # This makes sure your workflow doesn't fail if sending the email fails
+
+    # This optional step just logs that the email step finished.
+    # It's helpful for debugging and explains in the Actions log what happened.
+    - name: Log email notification status
+      shell: bash
+      run: |
+        echo "Email notification step completed with status: ${{ inputs.status }}"
