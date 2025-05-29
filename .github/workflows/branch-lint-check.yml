@@ -55,7 +55,7 @@ jobs:
   lint:
     name: Python Lint
     runs-on: ubuntu-latest
-    timeout-minutes: 15  # Limit the job runtime.
+    timeout-minutes: 15  # 1. Limit the job runtime.
     outputs:
       lint_result: ${{ steps.linting.outputs.lint-result }}  # "pass", "fail" or "skipped"
       branch_name: ${{ steps.branch.outputs.name }}          # Current branch name.
@@ -77,10 +77,7 @@ jobs:
         with:
           fetch-depth: ${{ github.event_name == 'push' && 2 || 0 }}
 
-      # 3. Check for changed Python files.
-      # This step performs a git diff between HEAD~1 and HEAD.
-      # If no Python (.py) files are detected, it sets the output "python_files_changed" to "false".
-      # For workflow_dispatch events, assume all files have changed.
+      # 2.1 Check for changed Python files.
       - name: Check for changed Python files
         id: changed-files
         run: |
@@ -101,12 +98,12 @@ jobs:
             fi
           fi
           
-      # 4. Get current date and time (UTC) for logging.
+      # 3. Get current date and time (UTC).
       - name: Get current date
         id: date
         run: echo "date=$(date -u +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
 
-      # 5. Set flag to lint only changed files or all files.
+      # 4. Set flag to lint only changed files or all files.
       - name: Set changed-only flag
         id: lint_mode
         run: |
@@ -116,8 +113,7 @@ jobs:
             echo "changed_only=true" >> $GITHUB_OUTPUT
           fi
 
-      # 6. Conditionally run the Python lint action.
-      # If there are changed Python files, run the lint action.
+      # 5. Conditionally run the Python lint action.
       - name: Run Python Linting
         id: linting
         if: steps.changed-files.outputs.python_files_changed == 'true'
@@ -126,7 +122,7 @@ jobs:
           changed-only: ${{ steps.lint_mode.outputs.changed_only }}
         continue-on-error: true
 
-      # 7. If no Python files were changed, bypass linting and set dummy output.
+      # 5.1 If no Python files were changed, bypass the linting step.
       - name: Skip Python Linting
         id: skip-linting
         if: steps.changed-files.outputs.python_files_changed == 'false'
@@ -134,7 +130,7 @@ jobs:
           echo "No Python files changed. Skipping linting."
           echo "lint-result=skipped" >> $GITHUB_OUTPUT
 
-      # 8. Upload the lint results log as an artifact.
+      # 6. Upload the lint results log as an artifact.
       - name: Upload lint results
         uses: actions/upload-artifact@v4
         with:
@@ -142,7 +138,7 @@ jobs:
           path: ./lint_results.log
           retention-days: 7
 
-      # 9. Generate lint summary if linting failed.
+      # 7. Generate lint summary if linting failed.
       - name: Generate lint summary
         id: lint-summary
         if: steps.linting.outputs.lint-result == 'fail'
@@ -162,14 +158,14 @@ jobs:
             echo "sample=" >> $GITHUB_OUTPUT
           fi
 
-      # 10. Extract the branch name from the Git reference.
+      # 8. Extract the branch name from the Git reference.
       - name: Get Branch Name
         id: branch
         run: |
           BRANCH_NAME="${GITHUB_REF#refs/heads/}"
           echo "name=$BRANCH_NAME" >> $GITHUB_OUTPUT
 
-      # 11. Fail the job if linting failed (for CI visibility).
+      # 9. Fail the job if linting fails (for CI visibility).
       - name: Check linting status
         if: steps.linting.outputs.lint-result == 'fail'
         run: |
@@ -179,9 +175,9 @@ jobs:
   issue-management:
     name: Issue Management
     runs-on: ubuntu-latest
-    needs: [lint]  # This job runs after the lint job completes.
+    needs: [lint]  # This job runs after the lint job.
     timeout-minutes: 10  # Limit the job runtime.
-    if: always()  # Always run regardless of lint job outcome.
+    if: always()  # Always run regardless of lint outcome.
     steps:
       # 1. Checkout repository.
       - name: Checkout repository
@@ -199,7 +195,7 @@ jobs:
           script: |
             //const core = require('@actions/core');
             const branchName = "${{ needs.lint.outputs.branch_name }}";
-            // Fetch all open issues with labels "lint-failure" and "branch:<branchName>"
+            // Fetch open issues with the specified labels.
             const issues = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -293,7 +289,7 @@ jobs:
             }
             const errorCount = "${{ needs.lint.outputs.lint_summary_error_count }}";
             const warningCount = "${{ needs.lint.outputs.lint_summary_warning_count }}";
-            const sample = "${{ needs.lint.outputs.lint_summary_sample }}";
+            const sample = `${{ needs.lint.outputs.lint_summary_sample }}`;
             const issueBody = `<!-- LINT-BOT-ISSUE -->
             ## Lint Failures Detected
 
