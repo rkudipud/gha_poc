@@ -61,7 +61,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15  # Limit job runtime.
     outputs:
-      lint-result: ${{ steps.linting.outputs.lint-result }}    # "pass", "fail", or "skipped"
+      lint-result: ${{ steps.check-lint-results.outputs.lint-result }}    # "pass", "fail", or "skipped"
       branch-name: ${{ steps.branch.outputs.name }}              # Current branch name.
       verbose-log: ${{ steps.linting.outputs.log-path }}         # Path to verbose lint log file.
       stats-log-path: ${{ steps.linting.outputs.stats-log-path }}     # Path to stats lint log file.
@@ -146,6 +146,7 @@ jobs:
           echo "No Python files changed. Skipping linting."
           echo "lint-result=skipped" >> $GITHUB_OUTPUT
 
+
       # -------------------------------------------------------------------------
       # 4. Upload lint logs as artifacts.
       #    Both the verbose and stats logs are uploaded so users can inspect the details.
@@ -168,6 +169,15 @@ jobs:
         run: |
           BRANCH_NAME="${GITHUB_REF#refs/heads/}"
           echo "name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+
+      # -------------------------------------------------------------------------
+      # 5.1 Set status variable for next stage use
+      # --------------------------------------------------------------------------
+      - name: Set lint result
+        id: check-lint-results
+        run: |
+            echo "lint-result=${{ steps.linting.outputs.lint-result || steps.skip-linting.outputs.lint-result }}" >> $GITHUB_OUTPUT
+
 
       # -------------------------------------------------------------------------
       # 6. Fail the job if linting failed (for CI visibility).
