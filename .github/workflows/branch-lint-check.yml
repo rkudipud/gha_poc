@@ -61,10 +61,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15  # Limit job runtime.
     outputs:
-      lint_result: ${{ steps.linting.outputs.lint-result }}    # "pass", "fail", or "skipped"
-      branch_name: ${{ steps.branch.outputs.name }}              # Current branch name.
-      verbose_log: ${{ steps.linting.outputs.log-path }}         # Path to verbose lint log file.
-      stats_log: ${{ steps.linting.outputs.stats-log-path }}     # Path to stats lint log file.
+      lint-result: ${{ steps.linting.outputs.lint-result }}    # "pass", "fail", or "skipped"
+      branch-name: ${{ steps.branch.outputs.name }}              # Current branch name.
+      verbose-log: ${{ steps.linting.outputs.log-path }}         # Path to verbose lint log file.
+      stats-log-path: ${{ steps.linting.outputs.stats-log-path }}     # Path to stats lint log file.
     steps:
       # -------------------------------------------------------------------------
       # 1. Cache pip dependencies.
@@ -164,7 +164,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             //const core = require('@actions/core');
-            const branchName = "${{ needs.lint.outputs.branch_name }}";
+            const branchName = "${{ needs.lint.outputs.branch-name }}";
             const issues = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -192,7 +192,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             //const core = require('@actions/core');
-            const branchName = "${{ needs.lint.outputs.branch_name }}";
+            const branchName = "${{ needs.lint.outputs.branch-name }}";
             const actor = context.actor;
             const sha = context.sha.substring(0, 7);
             const currentDateTime = new Date().toISOString();
@@ -244,7 +244,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             //const core = require('@actions/core');
-            const branchName = "${{ needs.lint.outputs.branch_name }}";
+            const branchName = "${{ needs.lint.outputs.branch-name }}";
             const actor = context.actor;
             const sha = context.sha.substring(0, 7);
             const currentDateTime = new Date().toISOString();
@@ -297,7 +297,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             //const core = require('@actions/core');
-            const branchName = "${{ needs.lint.outputs.branch_name }}";
+            const branchName = "${{ needs.lint.outputs.branch-name }}";
             const actor = context.actor;
             const sha = context.sha.substring(0, 7);
             const currentDateTime = new Date().toISOString();
@@ -338,7 +338,7 @@ jobs:
           server_port: ${{ secrets.MAIL_PORT }}
           username: ${{ secrets.MAIL_USERNAME }}
           password: ${{ secrets.MAIL_PASSWORD }}
-          subject: "${{ needs.lint.outputs.lint-result == 'pass' && '✅ Lint Check Passed' || (needs.lint.outputs.lint-result == 'fail' && '❌ Lint Check Failed' || '⚠️ Lint Check Skipped') }}: Branch ${{ needs.lint.outputs.branch_name }}"
+          subject: "${{ needs.lint.outputs.lint-result == 'pass' && '✅ Lint Check Passed' || (needs.lint.outputs.lint-result == 'fail' && '❌ Lint Check Failed' || '⚠️ Lint Check Skipped') }}: Branch ${{ needs.lint.outputs.branch-name }}"
           body: |
             Linting Status: ${{ needs.lint.outputs.lint-result }}
 
@@ -348,7 +348,7 @@ jobs:
             - Skipped: No Python files changed (unless manually triggered).
 
             Repository: ${{ github.repository }}
-            Branch: ${{ needs.lint.outputs.branch_name }}
+            Branch: ${{ needs.lint.outputs.branch-name }}
             Commit: ${{ github.sha }}
             Time: ${{ steps.date.outputs.date || '(No date available)' }}
 
@@ -362,7 +362,7 @@ jobs:
         if: always()
         run: |
           echo "## Linting Result: ${{ needs.lint.outputs.lint-result }}" >> $GITHUB_STEP_SUMMARY
-          echo "Branch: ${{ needs.lint.outputs.branch_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "Branch: ${{ needs.lint.outputs.branch-name }}" >> $GITHUB_STEP_SUMMARY
           echo "Reason:" >> $GITHUB_STEP_SUMMARY
           if [ "${{ needs.lint.outputs.lint-result }}" = "pass" ]; then
             echo "All Python files passed the lint checks." >> $GITHUB_STEP_SUMMARY
