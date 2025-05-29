@@ -3,6 +3,7 @@
 #   # Concurrency control to prevent redundant runs on the same branch.
 #   group: branch-lint-check-${{ github.ref_name }}
 #   cancel-in-progress: true
+
 # ===================================================================
 # Branch Lint Check Workflow
 # -------------------------------------------------------------------
