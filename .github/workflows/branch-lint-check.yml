@@ -1,6 +1,5 @@
-# might enable concurrency control to prevent redundant runs on the same branch. for later future use
+# (1) Concurrency control (currently commented out for future use)
 # concurrency:
-#   # Concurrency control to prevent redundant runs on the same branch.
 #   group: branch-lint-check-${{ github.ref_name }}
 #   cancel-in-progress: true
 
@@ -37,38 +36,37 @@
 # NOTE: Do NOT remove any steps. Each step is crucial.
 # The composite action ".github/actions/python-lint" encapsulates all the linting logic,
 # so the main workflow only needs to call it.
-
 name: Branch Lint Check
 
 on:
   push:
-    # Uncomment if you want the workflow to run only on Python file changes:
+    # (4) (Optional) Uncomment to run only on Python file changes:
     # paths:
     #   - '**/*.py'
-    # Uncomment to skip main branch:
+    # (5) (Optional) Uncomment to skip main branch:
     # branches-ignore:
     #   - 'main'
   workflow_dispatch:
 
 permissions:
-  contents: read        # Read repository content.
-  issues: write         # Create, update, and close issues.
-  pull-requests: write  # For potential future use.
+  contents: read        # (6) Permission to read repository content.
+  issues: write         # (7) Permission to create, update, and close issues.
+  pull-requests: write   # (8) Permission for potential future use with pull requests.
 
 jobs:
   lint:
     name: Python Lint
     runs-on: ubuntu-latest
-    timeout-minutes: 15  # Limit job runtime.
+    timeout-minutes: 15  # (9) Limits the job runtime.
     outputs:
-      lint-result: ${{ steps.check-lint-results.outputs.lint-result }}    # "pass", "fail", or "skipped"
-      branch-name: ${{ steps.branch.outputs.name }}              # Current branch name.
-      verbose-log: ${{ steps.linting.outputs.log-path }}         # Path to verbose lint log file.
-      stats-log-path: ${{ steps.linting.outputs.stats-log-path }}     # Path to stats lint log file.
+      lint-result: ${{ steps.check-lint-results.outputs.lint-result }}    # (10) "pass", "fail", or "skipped" from linting.
+      branch-name: ${{ steps.branch.outputs.name }}                       # (11) Extracted branch name.
+      verbose-log: ${{ steps.linting.outputs.log-path }}                  # (12) Path to the verbose lint log.
+      stats-log-path: ${{ steps.linting.outputs.stats-log-path }}           # (13) Path to the concise statistics lint log.
     steps:
       # -------------------------------------------------------------------------
-      # 1. Cache pip dependencies.
-      #    Caches dependencies from requirements.txt to speed up subsequent runs.
+      # Step 1: Cache pip dependencies.
+      #         This caches dependencies defined in requirements.txt to speed up future runs.
       # -------------------------------------------------------------------------
       - name: Cache pip dependencies
         uses: actions/cache@v3
@@ -76,25 +74,29 @@ jobs:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
           restore-keys: ${{ runner.os }}-pip-
+        # [1] Ensures package installations are reused between runs.
 
       # -------------------------------------------------------------------------
-      # 2. Checkout the repository.
-      #    Retrieves the repository code.
+      # Step 2: Checkout the repository.
+      #         Retrieves the latest code from the repository.
       # -------------------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: ${{ github.event_name == 'push' && 2 || 0 }}
+        # [2] Provides the source code needed for linting.
 
-
-      # 2.1 Check for changed Python files.
+      # -------------------------------------------------------------------------
+      # Step 3: Check for changed Python files.
+      #         Determines if Python files have changed to decide whether to run linting.
+      # -------------------------------------------------------------------------
       - name: Check for changed Python files
         id: changed-files
         run: |
-          # Get the list of changed files between HEAD and HEAD~1.
+          # Get the list of files changed between HEAD and HEAD~1.
           CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD)
           echo "Changed files: $CHANGED_FILES"
-          # Check if any changed file ends with .py
+          # Check if any changed file ends with .py and update output accordingly.
           if echo "$CHANGED_FILES" | grep -q "\.py$"; then
             echo "python_files_changed=true"
             echo "python_files_changed=true" >> $GITHUB_OUTPUT
@@ -107,8 +109,12 @@ jobs:
                 echo "python_files_changed=false" >> $GITHUB_OUTPUT
             fi
           fi
+        # [3] Decides whether linting is necessary based on file changes.
 
-      # 4. Set flag to lint only changed files or all files.
+      # -------------------------------------------------------------------------
+      # Step 4: Set changed-only flag.
+      #         Determines whether to lint only changed files or the entire codebase.
+      # -------------------------------------------------------------------------
       - name: Set changed-only flag
         id: lint_mode
         run: |
@@ -117,17 +123,11 @@ jobs:
           else
             echo "changed_only=true" >> $GITHUB_OUTPUT
           fi
+        # [4] Adjusts linting behavior according to the trigger type.
 
       # -------------------------------------------------------------------------
-      # 3. Run Python Linting using the composite action.
-      #    This action determines changed files (if applicable) and runs flake8 in two modes:
-      #      a) Verbose mode (full lint report).
-      #      b) Statistics mode (concise summary report).
-      #    The action outputs:
-      #      - lint-result (pass, fail, or skipped)
-      #      - log-path for the verbose report.
-      #      - stats-log-path for the summary report.
-      #      - changed-files list.
+      # Step 5: Run Python Linting using the composite action.
+      #         Executes the linting action which produces the lint results and log files.
       # -------------------------------------------------------------------------
       - name: Run Python Linting
         id: linting
@@ -137,19 +137,23 @@ jobs:
           changed-only: ${{ steps.lint_mode.outputs.changed_only }}
           python-version: '3.11.1'
         continue-on-error: true
+        # [5] Invokes the composite lint action to perform detailed and concise lint reporting.
 
-      # 5.1 If no Python files were changed, bypass the linting step.
+      # -------------------------------------------------------------------------
+      # Step 6: Skip Python Linting.
+      #         Bypasses the linting steps if no Python files have changed.
+      # -------------------------------------------------------------------------
       - name: Skip Python Linting
         id: skip-linting
         if: steps.changed-files.outputs.python_files_changed == 'false'
         run: |
           echo "No Python files changed. Skipping linting."
           echo "lint-result=skipped" >> $GITHUB_OUTPUT
-
+        # [6] Marks the lint result as "skipped" when linting is unnecessary.
 
       # -------------------------------------------------------------------------
-      # 4. Upload lint logs as artifacts.
-      #    Both the verbose and stats logs are uploaded so users can inspect the details.
+      # Step 7: Upload lint artifacts.
+      #         Uploads lint log files (verbose and stats) as artifacts for later use.
       # -------------------------------------------------------------------------
       - name: Upload lint artifacts
         uses: actions/upload-artifact@v4
@@ -159,55 +163,71 @@ jobs:
             ${{ steps.linting.outputs.log-path }}
             ${{ steps.linting.outputs.stats-log-path }}
           retention-days: 7
-
+        # [7] Makes log files accessible for the issue-management job.
 
       # -------------------------------------------------------------------------
-      # 5. Extract branch name from GITHUB_REF.
+      # Step 8: Get Branch Name.
+      #         Extracts the branch name from the Git reference.
       # -------------------------------------------------------------------------
       - name: Get Branch Name
         id: branch
         run: |
           BRANCH_NAME="${GITHUB_REF#refs/heads/}"
           echo "name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+        # [8] Provides the branch name for use in further steps.
 
       # -------------------------------------------------------------------------
-      # 5.1 Set status variable for next stage use
-      # --------------------------------------------------------------------------
+      # Step 9: Set lint result.
+      #         Merges outputs from either the linting or the skip step.
+      # -------------------------------------------------------------------------
       - name: Set lint result
         id: check-lint-results
         run: |
             echo "lint-result=${{ steps.linting.outputs.lint-result || steps.skip-linting.outputs.lint-result }}" >> $GITHUB_OUTPUT
-
+        # [9] Consolidates the lint result for downstream processing.
 
       # -------------------------------------------------------------------------
-      # 6. Fail the job if linting failed (for CI visibility).
-      #     If the composite action sets lint-result as 'fail', then exit nonzero.
+      # Step 10: Check linting status.
+      #          Fails the job if linting resulted in failure.
       # -------------------------------------------------------------------------
       - name: Check linting status
         if: steps.linting.outputs.lint-result == 'fail'
         run: |
           echo "Linting failed. Issues were detected in the lint reports."
           exit 1
+        # [10] Ensures that a failure in linting marks the job as failed.
 
   issue-management:
     name: Issue Management
     runs-on: ubuntu-latest
     needs: [lint]
-    timeout-minutes: 10  # Limit job runtime.
-    if: always()  # Always run regardless of lint outcome.
+    timeout-minutes: 10  # (11) Sets a runtime limit for this job.
+    if: always()       # (12) Runs regardless of the lint outcome.
     steps:
       # -------------------------------------------------------------------------
-      # 1. Checkout the repository.
+      # Step 1: Checkout repository.
+      #         Retrieves the full repository for issue management operations.
       # -------------------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+        # [1] Provides repository code for further tasks.
 
       # -------------------------------------------------------------------------
-      # 2. Find all open lint issues for this branch.
-      #    Searches for open issues with labels "lint-failure" and the branch name.
-      #    NOTE: The 'core' import is commented intentionally.
+      # Step 2: Download lint artifacts.
+      #         Downloads artifacts generated in the lint job (e.g., log files).
+      # -------------------------------------------------------------------------
+      - name: Download lint artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: lint-artifacts-${{ needs.lint.outputs.branch-name }}
+          path: ./  # Artifacts are downloaded to the current directory.
+        # [2] Makes the generated log files available for reading.
+
+      # -------------------------------------------------------------------------
+      # Step 3: Find all open lint issues for this branch.
+      #         Searches for open issues labeled with "lint-failure" and the branch name.
       # -------------------------------------------------------------------------
       - name: Find all lint issues for this branch
         id: find-lint-issues
@@ -233,10 +253,11 @@ jobs:
             core.setOutput('issue_numbers', issueNumbers);
             core.setOutput('exists', exists);
             return { issue_numbers: issueNumbers, exists: exists };
+        # [3] Retrieves any existing open lint issue(s) for the branch.
 
       # -------------------------------------------------------------------------
-      # 3a. Update existing lint issue if linting failed.
-      #     Uses the stats log content as the main body with links to artifacts.
+      # Step 4: Update existing lint issue if linting failed.
+      #         Uses the downloaded stats log and changed-files information to update the issue.
       # -------------------------------------------------------------------------
       - name: Update existing lint issue
         if: ${{ success() && (needs.lint.outputs.lint-result == 'fail') && (steps.find-lint-issues.outputs.exists == 'true') }}
@@ -246,13 +267,14 @@ jobs:
           script: |
             //const core = require('@actions/core');
             const branchName = "${{ needs.lint.outputs.branch-name }}";
+            const changedFiles = `${{ needs.lint.outputs.changed-files }}`;
             const actor = context.actor;
             const sha = context.sha.substring(0, 7);
             const currentDateTime = new Date().toISOString();
             const fs = require('fs');
             let statsReport = '';
             try {
-              statsReport = fs.readFileSync('${{ steps.linting.outputs.stats-log-path }}', 'utf8');
+              statsReport = fs.readFileSync('./lint_stats.log', 'utf8');
             } catch (error) {
               statsReport = 'Error reading statistics log.';
             }
@@ -266,6 +288,12 @@ jobs:
             - **Branch:** ${branchName}
             - **Author:** @${actor}
             - **Pushed at:** ${currentDateTime}
+
+            ## Lint Failure
+            ### Changed files:
+            \`\`\`
+            ${changedFiles}
+            \`\`\`
 
             ### Lint Summary Report
             \`\`\`
@@ -285,10 +313,11 @@ jobs:
               issue_number: firstIssueNumber,
               body: commentBody,
             });
+        # [4] Updates an existing lint issue with current log and file-change details.
 
       # -------------------------------------------------------------------------
-      # 3b. Create a new lint issue if none exists and linting failed.
-      #     Uses the stats log content as the main body and guidance for next steps.
+      # Step 5: Create a new lint issue if one does not exist.
+      #         If linting failed and no current lint issue exists, create a new issue.
       # -------------------------------------------------------------------------
       - name: Create new lint issue
         if: ${{ success() && (needs.lint.outputs.lint-result == 'fail') && (steps.find-lint-issues.outputs.exists != 'true') }}
@@ -300,11 +329,12 @@ jobs:
             const branchName = "${{ needs.lint.outputs.branch-name }}";
             const actor = context.actor;
             const sha = context.sha.substring(0, 7);
+            const changedFiles = `${{ needs.lint.outputs.changed-files }}`;
             const currentDateTime = new Date().toISOString();
             const fs = require('fs');
             let statsReport = '';
             try {
-              statsReport = fs.readFileSync('${{ steps.linting.outputs.stats-log-path }}', 'utf8');
+              statsReport = fs.readFileSync('./lint_stats.log', 'utf8');
             } catch (error) {
               statsReport = 'Error reading statistics log.';
             }
@@ -316,6 +346,12 @@ jobs:
             - **Branch:** ${branchName}
             - **Author:** @${actor}
             - **Pushed at:** ${currentDateTime}
+
+            ## Lint Failure
+            ### Changed files:
+            \`\`\`
+            ${changedFiles}
+            \`\`\`
 
             ### Lint Summary Report
             \`\`\`
@@ -338,10 +374,11 @@ jobs:
               assignees: [actor],
               labels: ['lint-failure', 'bug', `branch:${branchName}`],
             });
+        # [5] Creates a new lint issue with the current log data since no existing issue was found.
 
       # -------------------------------------------------------------------------
-      # 4. Close existing lint issues if linting passes.
-      #     Posts a comment on each issue and closes it.
+      # Step 6: Close existing lint issues if linting passed.
+      #         Comment on and close any existing lint issues.
       # -------------------------------------------------------------------------
       - name: Close lint issues if lint passes
         if: ${{ success() && (needs.lint.outputs.lint-result == 'pass') && (steps.find-lint-issues.outputs.exists == 'true') }}
@@ -351,6 +388,7 @@ jobs:
           script: |
             //const core = require('@actions/core');
             const branchName = "${{ needs.lint.outputs.branch-name }}";
+            const changedFiles = `${{ needs.lint.outputs.changed-files }}`;
             const actor = context.actor;
             const sha = context.sha.substring(0, 7);
             const currentDateTime = new Date().toISOString();
@@ -361,6 +399,12 @@ jobs:
                 repo: context.repo.repo,
                 issue_number: Number(issueNumber),
                 body: `## 🟢 Lint Issues Resolved
+
+                ## Lint Failure
+                ### Changed files:
+                \`\`\`
+                ${changedFiles}
+                \`\`\`
 
                 The lint issues were resolved in commit [${sha}](https://github.com/${context.repo.owner}/${context.repo.repo}/commit/${context.sha}) by @${actor} on ${currentDateTime}.
 
@@ -376,11 +420,11 @@ jobs:
                 state: 'closed',
               });
             }
+        # [6] Closes all existing lint issues after a successful lint run.
 
       # -------------------------------------------------------------------------
-      # 5. Send an email summary detailing the lint outcome.
-      #     The email displays a concise status along with reasons based on file changes
-      #     and trigger type.
+      # Step 7: Send email notification.
+      #         Sends an email summarizing the lint outcome, including details on status.
       # -------------------------------------------------------------------------
       - name: Send email notification
         uses: dawidd6/action-send-mail@v3
@@ -406,10 +450,11 @@ jobs:
             Time: ${{ steps.date.outputs.date || '(No date available)' }}
 
             [ View workflow run ](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+        # [7] Email notification for stakeholders regarding the lint outcome.
 
       # -------------------------------------------------------------------------
-      # 6. Append a GitHub Actions workflow summary.
-      #     Provides a brief overview including status and a reason.
+      # Step 8: Append workflow summary.
+      #         Adds a final concise summary to the GitHub Actions summary section.
       # -------------------------------------------------------------------------
       - name: Add workflow summary
         if: always()
@@ -424,3 +469,4 @@ jobs:
           else
             echo "Linting was skipped because no Python files were changed (unless triggered manually)." >> $GITHUB_STEP_SUMMARY
           fi
+        # [8] Provides a final summary displayed in the GitHub Actions run.
