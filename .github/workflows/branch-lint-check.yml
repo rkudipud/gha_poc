@@ -2,7 +2,7 @@
 # concurrency:
 #   group: branch-lint-check-${{ github.ref_name }}
 #   cancel-in-progress: true
-
+#
 # ==============================================================================
 # Branch Lint Check Workflow
 # ==============================================================================
