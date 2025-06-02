@@ -43,7 +43,7 @@ class GracefulExiter:
         signal.signal(signal.SIGINT, self.change_state)
 
     def change_state(self, signum, frame):
-        print(f"{bcolors.WARNING}ctrl+c Received, press again to exit{bcolors.ENDC}", flush=True)
+        print(f"{bcolors.WARNING}ctrl+c Received, press again to exit{bcolors.ENDC}", flush=True )
         signal.signal(signal.SIGINT, signal.SIG_DFL)
         self.state = True
 
