@@ -6,9 +6,9 @@ A CLI tool for managing the modular test framework configuration.
 Provides easy ways to add tests, modify weights, and validate configuration.
 
 Usage:
-    python devops/release_automation/test-config-manager.py --list
-    python devops/release_automation/test-config-manager.py --update .github/pr-test-config.yml --add-test "security_scan:90"
-    python devops/release_automation/test-config-manager.py --validate
+    python devops/release_automation/test_config_manager.py --list
+    python devops/release_automation/test_config_manager.py --update .github/pr-test-config.yml --add-test "security_scan:90"
+    python devops/release_automation/test_config_manager.py --validate
 """
 
 import argparse
@@ -16,7 +16,7 @@ import json
 import sys
 import yaml
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, Any
 
 
 class TestConfigManager:
@@ -300,19 +300,19 @@ def main():
         epilog="""
 Examples:
   # List all configured tests
-  python test-config-manager.py list
+  python test_config_manager.py list
 
   # Add a new soft check test
-  python test-config-manager.py add-test my_test "My Custom Test" --weight 15 --action-path .github/actions/my-test
+  python test_config_manager.py add-test my_test "My Custom Test" --weight 15 --action-path .github/actions/my-test
 
   # Add a new hard check test
-  python test-config-manager.py add-test security_check "Security Check" --enforcement hard --action-path .github/actions/security
+  python test_config_manager.py add-test security_check "Security Check" --enforcement hard --action-path .github/actions/security
 
   # Set scoring thresholds
-  python test-config-manager.py set-thresholds --auto-merge 90 --manual-review 70
+  python test_config_manager.py set-thresholds --auto-merge 90 --manual-review 70
 
   # Validate configuration
-  python test-config-manager.py validate
+  python test_config_manager.py validate
         """
     )
     

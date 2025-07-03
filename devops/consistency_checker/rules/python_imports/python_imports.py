@@ -15,8 +15,7 @@ Can automatically fix some issues like removing unused imports and sorting impor
 import ast
 import os
 from pathlib import Path
-from typing import Dict, List, Any, Set
-import subprocess
+from typing import Dict, List, Any
 
 
 DESCRIPTION = "Checks Python import consistency and identifies unused/duplicate imports"
@@ -272,7 +271,6 @@ def fix(repo_root: Path, violations: List[Dict[str, Any]]) -> Dict[str, Any]:
 if __name__ == '__main__':
     # Allow running rule directly for testing
     import sys
-    from pathlib import Path
     
     repo_root = Path.cwd()
     if len(sys.argv) > 1:

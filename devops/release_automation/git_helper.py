@@ -6,27 +6,20 @@ This script provides a simplified interface for developers to work with
 the enterprise CI/CD pipeline without needing deep Git knowledge.
 
 Usage:
-    python devops/release_automation/git-helper.py create-branch --type feature --issue 123 --description "add-new-feature"
-    python devops/release_automation/git-helper.py commit-push --message "Implement new feature"
-    python devops/release_automation/git-helper.py check-status
-    python devops/release_automation/git-helper.py create-pr --title "Add new feature"
-    python devops/release_automation/git-helper.py sync-main
-    python devops/release_automation/git-helper.py resolve-conflicts
+    python devops/release_automation/git_helper.py create-branch --type feature --issue 123 --description "add-new-feature"
+    python devops/release_automation/git_helper.py commit-push --message "Implement new feature"
+    python devops/release_automation/git_helper.py check-status
+    python devops/release_automation/git_helper.py create-pr --title "Add new feature"
+    python devops/release_automation/git_helper.py sync-main
+    python devops/release_automation/git_helper.py resolve-conflicts
 """
 import argparse
 import subprocess
 import sys
-import os
 import json
 import re
-import time
-from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
-try:
-    import requests
-except ImportError:
-    requests = None  # Optional dependency
 
 
 class Colors:
@@ -61,8 +54,8 @@ class GitHelper:
         raise Exception("Not in a Git repository")
     
     def _load_config(self) -> Dict[str, Any]:
-        """Load configuration from .git-helper-config.json"""
-        config_file = self.repo_root / '.git-helper-config.json'
+        """Load configuration from .git_helper_config.json"""
+        config_file = self.repo_root / '.git_helper_config.json'
         if config_file.exists():
             with open(config_file, 'r') as f:
                 return json.load(f)
@@ -89,7 +82,7 @@ class GitHelper:
             "protected_branches": ["main", "develop", "release/*"]
         }
         
-        config_file = self.repo_root / '.git-helper-config.json'
+        config_file = self.repo_root / '.git_helper_config.json'
         with open(config_file, 'w') as f:
             json.dump(config, f, indent=2)
         
@@ -467,11 +460,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python git-helper.py create-branch --type feature --jira PROJ-123 --description "add-new-feature"
-  python git-helper.py commit-push --message "Implement new feature"
-  python git-helper.py check-status
-  python git-helper.py create-pr --title "Add new feature"
-  python git-helper.py sync-main
+  python git_helper.py create-branch --type feature --jira PROJ-123 --description "add-new-feature"
+  python git_helper.py commit-push --message "Implement new feature"
+  python git_helper.py check-status
+  python git_helper.py create-pr --title "Add new feature"
+  python git_helper.py sync-main
         """
     )
     

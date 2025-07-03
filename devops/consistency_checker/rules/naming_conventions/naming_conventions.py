@@ -17,7 +17,7 @@ import ast
 import os
 import re
 from pathlib import Path
-from typing import Dict, List, Any, Set
+from typing import Dict, List, Any
 
 
 DESCRIPTION = "Enforces consistent naming conventions for Python code"
@@ -299,7 +299,6 @@ def fix(repo_root: Path, violations: List[Dict[str, Any]]) -> Dict[str, Any]:
 if __name__ == '__main__':
     # Allow running rule directly for testing
     import sys
-    from pathlib import Path
     
     repo_root = Path.cwd()
     if len(sys.argv) > 1:

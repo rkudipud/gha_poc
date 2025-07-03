@@ -16,7 +16,6 @@ Usage:
 
 import argparse
 import sys
-import os
 import importlib.util
 import json
 import yaml
@@ -24,7 +23,6 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 from datetime import datetime
-import subprocess
 
 
 @dataclass

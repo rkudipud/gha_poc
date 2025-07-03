@@ -10,23 +10,49 @@
 # - Soft checks contribute to overall score
 # - Thresholds determine auto-merge vs manual review
 #
-# Last Updated: July 2, 2025
+# Quick Start:
+# 1. Adjust thresholds below based on your team's standards
+# 2. Enable/disable checks based on your project requirements
+# 3. Customize weights to reflect your priorities
+# 4. Test with a sample PR before deploying
+#
+# Useful Commands:
+# - Test configuration: python -c "import yaml; yaml.safe_load(open('.github/pr-test-config.yml'))"
+# - View current settings: grep -E "(threshold|weight):" .github/pr-test-config.yml
+# - Backup config: cp .github/pr-test-config.yml .github/pr-test-config.yml.bak
+#
+# Last Updated: July 3, 2025
 # ==============================================================================
 
 # Global Configuration
 global_config:
-  # Overall scoring thresholds
+  # Overall scoring thresholds (customize these for your team)
   auto_merge_threshold: 85    # Score >= 85% = Auto-merge approved
   manual_review_threshold: 65 # Score 65-84% = Manual review required
   block_threshold: 64         # Score <= 64% = Block merge
   
-  # Timeout settings (minutes)
-  max_test_timeout: 30
-  parallel_execution: true
+  # Execution settings
+  max_test_timeout: 30        # Maximum timeout for any single test (minutes)
+  parallel_execution: true    # Enable parallel test execution for speed
   
-  # Notification settings
-  notify_on_failure: true
-  create_issues_on_hard_failure: true
+  # Notification and issue management
+  notify_on_failure: true               # Send notifications on failures
+  create_issues_on_hard_failure: true   # Create GitHub issues for hard failures
+  
+  # Environment detection (customize keywords for your project)
+  environment_detection:
+    hotfix_keywords: ["hotfix", "emergency", "critical", "urgent"]
+    performance_labels: ["performance", "optimization", "benchmark"]
+    security_labels: ["security", "vulnerability", "cve"]
+    
+  # Resource limits
+  max_parallel_jobs: 4        # Limit concurrent jobs to avoid resource exhaustion
+  memory_limit_mb: 2048       # Memory limit per job
+  
+  # Retry configuration
+  retry_failed_checks: true
+  max_retries: 2
+  retry_delay_seconds: 30
 
 # Test Suite Definition
 test_suite:
@@ -44,9 +70,16 @@ test_suite:
     inputs:
       severity_threshold: "critical"
       fail_on_high: true
+  
+  - id: "syntax_validation"
+    name: "Python Syntax Validation"
+    description: "Validate Python syntax for all changed files"
+    weight: 0  # Hard check - no weight contribution
+    enforcement: "hard"
+    timeout_minutes: 5
     outputs_required:
-      - security_score
-      - vulnerabilities_found
+      - syntax_errors_count
+      - files_with_errors
     
   - id: "branch_protection"
     name: "Branch Protection Compliance"
@@ -250,79 +283,327 @@ action_templates:
 # ==============================================================================
 # Environment-Specific Overrides
 # ==============================================================================
+# Customize validation based on PR characteristics
+# Usage: System automatically detects environment and applies overrides
 environment_overrides:
-  # Development environment (less strict)
-  development:
+  # Hotfix environment - relaxed requirements for emergency fixes
+  hotfix:
     global_config:
-      auto_merge_threshold: 75
+      auto_merge_threshold: 75    # Lower threshold for hotfixes
       manual_review_threshold: 60
-    test_overrides:
-      - id: "security_critical"
-        enforcement: "soft"  # Relaxed for dev
+      max_test_timeout: 20        # Faster validation for urgency
+    test_suite_overrides:
+      - id: "documentation_check"
+        weight: 5               # Reduce documentation weight for hotfixes
       - id: "performance_test"
-        weight: 5  # Reduced weight
+        enabled: false          # Skip performance tests for hotfixes
+      - id: "code_coverage"
+        inputs:
+          minimum_coverage: 60  # Relaxed coverage requirement
   
-  # Production environment (more strict)
-  production:
+  # Performance environment - additional performance checks
+  performance:
     global_config:
-      auto_merge_threshold: 90
-      manual_review_threshold: 75
-    test_overrides:
-      - id: "license_compliance"
-        timeout_minutes: 20  # More thorough check
+      auto_merge_threshold: 90  # Higher bar for performance changes
+    test_suite_additions:
+      - id: "performance_benchmarks"
+        name: "Performance Benchmarks"
+        description: "Comprehensive performance regression testing"
+        weight: 25
+        enforcement: "soft"
+        timeout_minutes: 30
+        inputs:
+          benchmark_iterations: 10
+          memory_profiling: true
+    test_suite_overrides:
+      - id: "performance_test"
+        weight: 25              # Increase performance weight
+  
+  # Security environment - enhanced security checks
+  security:
+    global_config:
+      auto_merge_threshold: 90  # Higher bar for security changes
+    test_suite_overrides:
       - id: "security_scan_soft"
-        weight: 20  # Increased importance
+        weight: 30              # Increase security weight
+      - id: "security_critical"
+        inputs:
+          fail_on_medium: true  # Stricter security for security PRs
+          additional_tools: ["semgrep", "codeql"]
 
 # ==============================================================================
 # Notification Configuration
 # ==============================================================================
+# Configure how and when notifications are sent
 notifications:
-  # GitHub issue creation on failures
-  issue_templates:
-    hard_failure:
-      title: "🚨 Hard Check Failure: {{test_name}} - PR #{{pr_number}}"
-      labels: ["ci-failure", "urgent", "{{test_id}}"]
-      assignees: ["@{{pr_author}}"]
-      body: |
-        **Hard Check Failed**: {{test_name}}
-        
-        **PR**: #{{pr_number}} - {{pr_title}}
-        **Author**: @{{pr_author}}
-        **Branch**: {{head_branch}} → {{base_branch}}
-        **Failed Test**: {{test_id}}
-        
-        **Failure Details**:
-        {{failure_details}}
-        
-        **Action Required**:
-        This is a hard check failure. The PR cannot be merged until this issue is resolved.
-        
-        **Next Steps**:
-        1. Review the failure details above
-        2. Fix the underlying issue
-        3. Push new commits to trigger re-validation
-        4. This issue will auto-close when checks pass
-
-  # Slack/Teams integration (optional)
-  webhook_notifications:
-    enabled: false
-    webhook_url: ""  # Set in GitHub secrets
-    channels:
-      hard_failures: "#critical-alerts"
-      soft_failures: "#code-quality"
-
-# ==============================================================================
-# Reporting and Analytics
-# ==============================================================================
-reporting:
-  # Generate detailed reports
-  enable_reports: true
-  report_formats: ["json", "html", "markdown"]
+  # Email notifications (configure SMTP settings in GitHub secrets)
+  email:
+    enabled: false  # Set to true when email service is configured
+    smtp_settings:
+      server: "smtp.company.com"
+      port: 587
+      use_tls: true
+    recipients:
+      default: ["devops-team@company.com"]
+      security_issues: ["security-team@company.com"]
+      performance_issues: ["performance-team@company.com"]
+    templates:
+      success: "✅ PR #{pr_number} auto-merged (Score: {score}%)"
+      manual_review: "⚠️ PR #{pr_number} requires manual review (Score: {score}%)"
+      blocked: "❌ PR #{pr_number} blocked by validation (Score: {score}%)"
+      hard_failure: "🚨 Hard check failed in PR #{pr_number}: {test_name}"
   
-  # Store results for analytics
-  store_results: true
-  retention_days: 30
+  # Slack notifications (configure webhook URL in GitHub secrets)
+  slack:
+    enabled: false  # Set to true when Slack webhook is configured
+    webhook_url_secret: "SLACK_WEBHOOK_URL"  # GitHub secret name
+    channels:
+      default: "#dev-team"
+      critical: "#critical-alerts"
+      security: "#security-alerts"
+    message_format: "markdown"
+  
+  # Microsoft Teams notifications
+  teams:
+    enabled: false
+    webhook_url_secret: "TEAMS_WEBHOOK_URL"
+    card_format: "adaptive"
+  
+  # GitHub notifications (always enabled)
+  github:
+    enabled: true
+    create_status_checks: true
+    comment_on_pr: true
+    create_issues_for_hard_failures: true
+    issue_labels: ["ci-failure", "auto-created"]
+    assignee_strategy: "pr_author"  # or "team_leads"
+
+# ==============================================================================
+# Custom Actions Integration
+# ==============================================================================
+# Define paths to custom validation actions for reusability
+custom_actions:
+  # Security scanning
+  security_scan_enhanced: ".github/actions/security-scan-enhanced"
+  vulnerability_check: ".github/actions/vulnerability-check"
+  
+  # Performance testing
+  performance_benchmark: ".github/actions/performance-benchmark"
+  load_testing: ".github/actions/load-testing"
+  
+  # Code quality
+  custom_linting: ".github/actions/project-specific-lint"
+  complexity_analysis: ".github/actions/complexity-check"
+  
+  # Documentation
+  docs_validation: ".github/actions/docs-validation"
+  api_docs_check: ".github/actions/api-docs-check"
+
+# ==============================================================================
+# Waiver System Configuration
+# ==============================================================================
+# Allow temporary exceptions for specific issues
+waivers:
+  enabled: true
+  max_duration_days: 30
+  approval_required: true
+  approval_teams: ["senior-developers", "tech-leads"]
+  
+  # Waiver file location
+  waiver_file: "devops/consistency_checker/waivers.yml"
+  
+  # Automatic waiver expiry warnings
+  expiry_warning_days: 7
+  notification_recipients: ["devops-team@company.com"]
+  
+  # Waiver categories
+  categories:
+    - name: "technical_debt"
+      max_duration_days: 60
+      requires_issue: true
+    - name: "external_dependency"
+      max_duration_days: 90
+      requires_justification: true
+    - name: "performance_exception"
+      max_duration_days: 14
+      requires_benchmarks: true
+
+# ==============================================================================
+# Reporting Configuration
+# ==============================================================================
+# Configure report generation and metrics collection
+reporting:
+  # Report generation
+  generate_reports: true
+  report_formats: ["json", "html", "markdown"]
+  upload_artifacts: true
+  artifact_retention_days: 30
+  
+  # Metrics collection
+  collect_metrics: true
+  metrics_retention_days: 90
   
   # Trend analysis
-  track_trends: true
+  enable_trend_analysis: true
   baseline_period_days: 14
+  comparison_periods: [7, 14, 30]
+  
+  # Dashboard integration (optional)
+  dashboard:
+    enabled: false
+    endpoint: "https://your-dashboard.com/api/pr-metrics"
+    auth_token_secret: "DASHBOARD_API_TOKEN"
+  
+  # Custom report templates
+  templates:
+    summary_template: ".github/templates/pr-summary.md"
+    detailed_template: ".github/templates/pr-detailed.html"
+
+# ==============================================================================
+# Integration Settings
+# ==============================================================================
+# Configure integrations with external tools and services
+integrations:
+  # JIRA integration for ticket validation
+  jira:
+    enabled: false  # Set to true when JIRA is configured
+    server_url: "https://your-company.atlassian.net"
+    project_keys: ["PROJ", "DEV", "SEC"]
+    ticket_validation:
+      require_ticket_in_title: false
+      require_ticket_in_branch: true
+      valid_statuses: ["In Progress", "In Review"]
+    auth:
+      username_secret: "JIRA_USERNAME"
+      token_secret: "JIRA_API_TOKEN"
+  
+  # SonarQube integration for code quality
+  sonarqube:
+    enabled: false
+    server_url: "https://sonarqube.company.com"
+    project_key: "your-project-key"
+    quality_gate_wait: true
+    timeout_minutes: 10
+    auth:
+      token_secret: "SONARQUBE_TOKEN"
+  
+  # External quality gates
+  quality_gates:
+    enabled: false
+    endpoints:
+      - name: "external_security_scan"
+        url: "https://api.security-system.com/scan"
+        timeout_seconds: 300
+        required_score: 85
+      - name: "performance_gate"
+        url: "https://api.perf-system.com/validate"
+        timeout_seconds: 180
+        required_score: 80
+
+# ==============================================================================
+# Advanced Configuration
+# ==============================================================================
+# Advanced settings for fine-tuning behavior
+advanced:
+  # Caching configuration
+  caching:
+    enabled: true
+    cache_key_prefix: "pr-validation-v2"
+    cache_ttl_hours: 24
+    cache_dependency_installs: true
+    cache_test_results: false  # Test results should always be fresh
+  
+  # Debug and logging
+  debug:
+    enabled: false
+    verbose_logging: false
+    save_debug_artifacts: false
+    debug_timeout_minutes: 60
+  
+  # Resource optimization
+  resource_optimization:
+    enable_smart_scheduling: true
+    prioritize_critical_checks: true
+    balance_load_across_runners: true
+  
+  # Experimental features
+  experimental:
+    ai_powered_suggestions: false
+    predictive_scoring: false
+    auto_fix_simple_issues: false
+
+# ==============================================================================
+# Template for Adding New Checks
+# ==============================================================================
+# Copy and modify this template to add new validation checks
+#
+# new_check_template: |
+#   - id: "your_new_check_id"
+#     name: "Your New Check Name"
+#     description: "Description of what this check does"
+#     weight: 10  # For soft checks, 0 for hard checks
+#     enforcement: "soft"  # or "hard"
+#     timeout_minutes: 15
+#     enabled: true
+#     inputs:
+#       # Custom inputs for your check
+#       input_parameter: "value"
+#     outputs_required:
+#       - output_name
+#     score_mapping:  # Only for soft checks
+#       output_field: "score"
+#       min_score: 0
+#       max_score: 100
+
+# ==============================================================================
+# Troubleshooting Guide (Comments)
+# ==============================================================================
+# Common Issues and Solutions:
+#
+# 1. Snake case enforcement still active:
+#    - Check: devops/consistency_checker/checker_config.yml
+#    - Ensure: naming_conventions is in disabled_rules
+#    - Verify: enforce_snake_case: false
+#
+# 2. Auto-merge not working:
+#    - Check: Score >= auto_merge_threshold
+#    - Verify: All hard checks are passing
+#    - Review: PR has required approvals (if enabled)
+#
+# 3. Tests timing out:
+#    - Increase: timeout_minutes for specific tests
+#    - Check: max_test_timeout in global_config
+#    - Consider: Splitting large tests into smaller ones
+#
+# 4. High failure rates:
+#    - Lower: auto_merge_threshold temporarily
+#    - Review: Individual test weights
+#    - Check: Team coding standards alignment
+#
+# 5. Configuration errors:
+#    - Validate: YAML syntax with online validators
+#    - Test: python -c "import yaml; yaml.safe_load(open('.github/pr-test-config.yml'))"
+#    - Check: Required fields are present
+#
+# Useful Commands:
+# - View weights: grep -E "weight:" .github/pr-test-config.yml
+# - Check thresholds: grep -E "threshold:" .github/pr-test-config.yml  
+# - Validate YAML: python -c "import yaml; yaml.safe_load(open('.github/pr-test-config.yml'))"
+# - Backup config: cp .github/pr-test-config.yml .github/pr-test-config.yml.$(date +%Y%m%d)
+
+# ==============================================================================
+# Version and Metadata
+# ==============================================================================
+metadata:
+  config_version: "2.1.0"
+  last_updated: "2025-07-03"
+  maintained_by: "DevOps Team"
+  documentation_url: "https://github.com/your-org/your-repo/blob/main/devops/docs/pr-validation.md"
+  support_contact: "devops-team@company.com"
+  changelog:
+    - version: "2.1.0"
+      date: "2025-07-03"
+      changes: ["Added comprehensive template sections", "Enhanced documentation", "Added troubleshooting guide"]
+    - version: "2.0.0"  
+      date: "2025-07-02"
+      changes: ["Migrated to modular architecture", "Added environment overrides", "Implemented auto-merge"]

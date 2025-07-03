@@ -109,12 +109,12 @@ The main branch is protected by:
 ### For Developers
 
 1. **Setup Environment**: `python devops/release_automation/setup.py` to configure tools
-2. **Create Branch**: `python devops/release_automation/git-helper.py create-branch --type feature --issue 123 --description "add-feature"`
+2. **Create Branch**: `python devops/release_automation/git_helper.py create-branch --type feature --issue 123 --description "add-feature"`
 3. **Make Changes**: Develop your feature or fix
 4. **Local Validation**: `python devops/consistency_checker/checker.py` to catch issues early
-5. **Commit Changes**: `python devops/release_automation/git-helper.py commit-push --message "Implement feature"`
-6. **Check Status**: `python devops/release_automation/git-helper.py check-status` to monitor branch validation
-7. **Create PR**: `python devops/release_automation/git-helper.py create-pr --title "Add feature"`
+5. **Commit Changes**: `python devops/release_automation/git_helper.py commit-push --message "Implement feature"`
+6. **Check Status**: `python devops/release_automation/git_helper.py check-status` to monitor branch validation
+7. **Create PR**: `python devops/release_automation/git_helper.py create-pr --title "Add feature"`
 8. **Monitor PR**: Check GitHub UI for validation progress and results
 
 ### For Maintainers

@@ -126,7 +126,7 @@ waivers:
 
 2. **Managing Test Configuration**:
    - Update `.github/pr-test-config.yml` to adjust test weights or thresholds
-   - Use `python devops/release_automation/test-config-manager.py` to validate configuration
+   - Use `python devops/release_automation/test_config_manager.py` to validate configuration
 
 3. **Managing Waivers**:
    - Review and approve waiver requests in `devops/consistency_checker/waivers.yml`
@@ -144,7 +144,7 @@ waivers:
 2. **Configuration Problems**:
    - Validate YAML syntax in configuration files
    - Check for correct indentation and structure
-   - Use the test-config-manager to validate PR test configuration
+   - Use the test_config_manager to validate PR test configuration
 
 3. **Waiver Issues**:
    - Ensure waiver format is correct

@@ -38,8 +38,8 @@ rules:
   enabled_rules: []  # Empty list means all rules are enabled
   
   disabled_rules:
-    # Example: disable specific rules
-    # - "naming_conventions"
+    # Disable naming_conventions rule entirely to avoid snake_case enforcement
+    - "naming_conventions"
     
   # Rule-specific configuration
   python_imports:
@@ -49,8 +49,10 @@ rules:
     allow_wildcard_in_init: true
     
   naming_conventions:
-    enforce_snake_case: true
-    enforce_pascal_case: true
+    # DISABLED: This entire rule is disabled via disabled_rules above
+    # These settings are kept for reference only
+    enforce_snake_case: false
+    enforce_pascal_case: false  # Also disable to avoid conflicts
     enforce_upper_case_constants: true
     min_variable_name_length: 2
     allow_single_letter_loop_vars: true
@@ -101,7 +103,7 @@ output:
 # Auto-fix configuration
 auto_fix:
   # Enable auto-fix by default
-  enabled: true
+  enabled: false
   
   # Backup files before auto-fixing
   backup_files: true

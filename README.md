@@ -1,6 +1,6 @@
 # Project Repository
 
-This repository contains the main project code and associated DevOps tools for CI/CD.
+This repository contains the main project code and an advanced DevOps automation system with a modular PR validation framework.
 
 ## Project Components
 
@@ -12,60 +12,129 @@ This repository contains the main project code and associated DevOps tools for C
 
 ## DevOps and CI/CD
 
-The CI/CD and DevOps tools have been moved to a dedicated directory to separate them from the main project code:
+This repository features a state-of-the-art DevOps automation system with 3 core components:
 
+### 🤖 1. GitHub Actions CI/CD
+- **PR Validation**: Automated testing, security scans, and quality gates
+- **Branch Protection**: Automated lint checks on every push  
+- **Auto-Merge**: Intelligent merge decisions based on quality scores
+
+### 🔍 2. Local Consistency Checks
+- **Code Quality**: Python linting, style checks, and complexity analysis
+- **Security**: Local security scanning and secret detection
+- **Waivers**: Managed exceptions for special cases
+
+### 🛠️ 3. Developer Helper Scripts  
+- **Git Helper**: Streamlined branch creation, commits, and PR management
+- **Setup Tool**: Automated environment configuration
+- **Config Manager**: Test configuration and validation management
+
+**📖 Complete Documentation**: [`DEVOPS_README.md`](DEVOPS_README.md) *(→ `devops/docs/README.md`)*
+
+### Quick Start
+
+```bash
+# 1. Setup environment
+python devops/release_automation/setup.py
+
+# 2. Run local checks before Git operations  
+python devops/consistency_checker/checker.py
+
+# 3. Use Git helper for streamlined workflow
+python devops/release_automation/git_helper.py create-branch --type feature --issue 123
 ```
-devops/
-├── consistency_checker/      # Code consistency validation framework
-├── release_automation/       # Release and workflow automation tools
-└── docs/                     # Documentation
-```
 
-For more information about the CI/CD components, see the [DevOps README](devops/README.md).
+## PR Validation System
 
-## Documentation
+The repository uses an advanced modular PR validation system:
 
-All CI/CD and tooling documentation has been moved to the `devops/docs/` directory:
+### Scoring Thresholds
+- **≥85%**: Auto-merge approved ✅
+- **65-84%**: Manual review required ⚠️
+- **≤64%**: Merge blocked ❌
 
-- [Architecture Documentation](devops/docs/ARCHITECTURE.md)
-- [Consistency Checker Guide](devops/docs/CONSISTENCY_CHECKER.md)
-- [GitHub Actions Guide](devops/docs/GITHUB_ACTIONS.md)
-- [Quick Start Guide](devops/docs/QUICK_START.md)
-- [Script Usage Guide](devops/docs/SCRIPT_USAGE.md)
-- [Workflow Guide](devops/docs/WORKFLOW.md)
-- [Pre-commit Hook Guide](devops/docs/PRE_COMMIT_HOOK.md)
+### Validation Categories
+1. **Hard Checks** (Must Pass):
+   - Critical security vulnerabilities
+   - Python syntax validation
+   - Dependency security
 
-## Using the Tools
+2. **Soft Checks** (Scoring):
+   - Code Quality (25%): Linting, complexity, coverage
+   - Security Scan (20%): Medium/low security issues  
+   - Testing (25%): Unit, integration, smoke tests
+   - Documentation (15%): Docstring coverage, README updates
+   - Compliance (15%): License headers, file structure
 
-All tools are now located in the `devops` directory and should be run from there:
+For detailed information, see the **[Complete DevOps Documentation](DEVOPS_README.md)**.
 
-### Consistency Checker
-```
-python devops/consistency_checker/checker.py --all
+## Quick Start
+
+### Setting Up PR Validation
+
+1. **Setup and customize**:
+   ```bash
+   # Interactive setup with all components
+   python devops/release_automation/setup.py
+   
+   # The configuration is all-in-one: .github/pr-test-config.yml
+   # Edit to customize thresholds, tests, and validation rules
+   ```
+
+2. **Customize for your project**:
+   - Adjust scoring thresholds
+   - Enable/disable specific checks
+   - Configure notification settings
+
+3. **Test with a sample PR**:
+   - Create a feature branch
+   - Make some changes
+   - Open a PR to see validation in action
+
+### Using Development Tools
+
+**Quick Commands**:
+
+#### Consistency Checker
+```bash
+# Run all checks before committing
+python devops/consistency_checker/checker.py
+
+# Run specific rule
 python devops/consistency_checker/checker.py --rule python_imports
+
+# List available rules
 python devops/consistency_checker/checker.py --list-rules
 ```
 
-### Git Helper
-```
-python devops/release_automation/git-helper.py create-branch --type feature --issue 123 --description "add-new-feature"
-python devops/release_automation/git-helper.py commit-push --message "Implement feature"
-python devops/release_automation/git-helper.py create-pr --title "Add new feature"
+#### Git Helper
+```bash
+# Create feature branch
+python devops/release_automation/git_helper.py create-branch --type feature --issue 123 --description "add-new-feature"
+
+# Commit and push
+python devops/release_automation/git_helper.py commit-push --message "Implement feature"
+
+# Create PR
+python devops/release_automation/git_helper.py create-pr --title "Add new feature"
 ```
 
-### Setup Tool
-```
+#### Setup and Configuration
+```bash
+# Interactive setup
 python devops/release_automation/setup.py
+
+# Test config management
+python devops/release_automation/test_config_manager.py --validate
 ```
 
-### Test Config Manager
-```
-python devops/release_automation/test-config-manager.py --update pr-test-config.yml --add-test "security_scan:90"
-```
+**📖 Complete tool documentation**: [`DEVOPS_README.md`](DEVOPS_README.md)
 
 ## Getting Started
 
-For a quick start guide on how to use this project, see the [Quick Start Guide](devops/docs/QUICK_START.md).
+**📖 Complete Guide**: [`DEVOPS_README.md`](DEVOPS_README.md) - Full documentation and setup instructions
+
+For a quick start with the project itself, the main files are preserved at the repository root.
 
 ## Directory Structure
 
@@ -78,7 +147,9 @@ The repository has been reorganized to separate the main project code from the D
 
 ## Need Help?
 
-If you need help with the CI/CD tools, check the documentation in the `devops/docs/` directory or run the specific tool with the `--help` flag.
+**📖 DevOps Documentation**: [`DEVOPS_README.md`](DEVOPS_README.md) - Complete system guide  
+**🔧 Script Help**: Run any script with `--help` flag for detailed usage  
+**🆘 Troubleshooting**: Check the troubleshooting section in the main documentation
 
 ## Important Project Files
 

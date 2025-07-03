@@ -2,14 +2,13 @@
 """
 Setup script for the Enterprise CI/CD Git Helper
 
-This script installs and configures the git-helper tool for developers.
+This script installs and configures the git_helper tool for developers.
 """
 
 import os
 import sys
 import json
 import subprocess
-import shutil
 from pathlib import Path
 
 
@@ -108,7 +107,7 @@ def create_config():
         config["main_branch"] = main_branch
     
     # Save configuration
-    config_file = Path('.git-helper-config.json')
+    config_file = Path('.git_helper_config.json')
     with open(config_file, 'w') as f:
         json.dump(config, f, indent=2)
     
@@ -117,31 +116,31 @@ def create_config():
 
 
 def install_git_helper():
-    """Install git-helper script"""
-    print("\n🔧 Installing git-helper...")
+    """Install git_helper script"""
+    print("\n🔧 Installing git_helper...")
     
     # Get current script directory
     script_dir = Path(__file__).parent
-    git_helper_path = script_dir / 'git-helper.py'
+    git_helper_path = script_dir / 'git_helper.py'
     
     if not git_helper_path.exists():
         # Try looking in the repo root
         repo_root = _find_repo_root()
-        alt_path = repo_root / 'devops' / 'release_automation' / 'git-helper.py'
+        alt_path = repo_root / 'devops' / 'release_automation' / 'git_helper.py'
         if alt_path.exists():
             git_helper_path = alt_path
         else:
-            print("❌ git-helper.py not found in current directory or devops/release_automation")
+            print("❌ git_helper.py not found in current directory or devops/release_automation")
             return False
     
-    # Make git-helper executable
+    # Make git_helper executable
     git_helper_path.chmod(0o755)
     
     # Create symlink in user's local bin directory
     local_bin = Path.home() / '.local' / 'bin'
     local_bin.mkdir(parents=True, exist_ok=True)
     
-    symlink_path = local_bin / 'git-helper'
+    symlink_path = local_bin / 'git_helper'
     
     try:
         if symlink_path.exists():
@@ -235,7 +234,7 @@ def create_alias():
         # Create git alias
         subprocess.run([
             'git', 'config', '--global', 'alias.helper', 
-            '!python git-helper.py'
+            '!python git_helper.py'
         ], check=True)
         
         print("✅ Created Git alias: git helper")
@@ -257,23 +256,23 @@ def print_usage_guide():
     print("📖 Quick Start Guide:")
     print()
     print("1. Create a new feature branch:")
-    print("   git-helper create-branch --type feature --jira PROJ-123 --description 'add-new-feature'")
+    print("   git_helper create-branch --type feature --jira PROJ-123 --description 'add-new-feature'")
     print("   # or: git helper create-branch --type feature --jira PROJ-123 --description 'add-new-feature'")
     print()
     print("2. Commit and push changes:")
-    print("   git-helper commit-push --message 'Implement new feature'")
+    print("   git_helper commit-push --message 'Implement new feature'")
     print()
     print("3. Check CI/CD status:")
-    print("   git-helper check-status")
+    print("   git_helper check-status")
     print()
     print("4. Create pull request:")
-    print("   git-helper create-pr --title 'Add new feature'")
+    print("   git_helper create-pr --title 'Add new feature'")
     print()
     print("5. Sync with main branch:")
-    print("   git-helper sync-main")
+    print("   git_helper sync-main")
     print()
     print("📁 Configuration Files:")
-    print("   .git-helper-config.json  - Main configuration")
+    print("   .git_helper_config.json  - Main configuration")
     print("   devops/consistency_checker/waivers.yml - Centralized waiver management")
     print()
     print("🔗 Useful Links:")

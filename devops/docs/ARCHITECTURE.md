@@ -7,15 +7,30 @@ This enterprise CI/CD solution is designed for **5000+ developers** with a modul
 ## 🏗️ Core Architecture
 
 ### 1. **Protected Branch Model**
+
+### 1. **Protected Branch Model**
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
 │   Developer     │    │   Feature        │    │   Main Branch   │
 │   Workstation   │    │   Branches       │    │   (Protected)   │
 │                 │    │                  │    │                 │
 │ Local Checks ───┼───►│ Branch Lint   ───┼───►│ PR Validation   │
-│ git-helper CLI  │    │ Auto Issues      │    │ Auto Merge      │
+│ git_helper CLI  │    │ Auto Issues      │    │ Auto Merge      │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
+
+
+```mermaid
+flowchart LR
+    Dev[👨‍💻 Developer<br/>Workstation]
+    Feature[🌿 Feature<br/>Branches]
+    Main[🛡️ Main Branch<br/>Protected]
+    
+    Dev --> |Local Checks<br/>git_helper CLI| Feature
+    Feature --> |Branch Lint<br/>Auto Issues| Main
+    Main --> |PR Validation<br/>Auto Merge| Main
 ```
+
+### 2. **Validation Pipeline**
 
 ### 2. **Validation Pipeline**
 ```
@@ -42,6 +57,35 @@ Push to Branch
 │ • Soft Checks   │ (Weighted Score)
 │ • Auto Decision │ (Merge/Review/Block)
 └─────────────────┘
+
+
+```mermaid
+flowchart TD
+    Push[📤 Push to Branch]
+    BranchLint[🤖 Branch Lint Workflow]
+    Changes[🔍 Smart Change Detection]
+    Lint[🐍 Python Lint]
+    Waiver[📋 Waiver Check]
+    Issues[⚠️ Issue Create]
+    
+    CreatePR[🔄 Create PR]
+    PRValid[🚀 PR Validation Workflow]
+    Hard[🛡️ Hard Checks]
+    Soft[📊 Soft Checks]
+    Decision[🎯 Auto Decision]
+    
+    Push --> BranchLint
+    BranchLint --> Changes
+    BranchLint --> Lint
+    BranchLint --> Waiver
+    BranchLint --> Issues
+    
+    BranchLint --> CreatePR
+    CreatePR --> PRValid
+    PRValid --> Hard
+    Hard --> |Must Pass| Soft
+    Soft --> |Weighted Score| Decision
+    Decision --> |Merge/Review/Block| Decision
 ```
 
 ## 🧩 Modular Components
@@ -99,19 +143,19 @@ Decision Matrix:
 
 ## 🔧 Developer Tools
 
-### 1. **git-helper CLI**
+### 1. **git_helper CLI**
 ```python
 # Core Operations
-git-helper create-branch --type feature --issue 123 --description "feature-name"
-git-helper commit-push --message "commit message"
-git-helper create-pr --title "PR title" --description "details"
-git-helper check-status
-git-helper sync-main
-git-helper resolve-conflicts
+git_helper create-branch --type feature --issue 123 --description "feature-name"
+git_helper commit-push --message "commit message"
+git_helper create-pr --title "PR title" --description "details"
+git_helper check-status
+git_helper sync-main
+git_helper resolve-conflicts
 
 # Configuration
-git-helper config --set github.token "token"
-git-helper config --set email.notifications true
+git_helper config --set github.token "token"
+git_helper config --set email.notifications true
 ```
 
 ### 2. **Local Consistency Checker**
@@ -255,20 +299,26 @@ sequenceDiagram
 ## 🔐 Security Architecture
 
 ### 1. **Multi-Layer Security**
-```
-┌─────────────────────────────────────────────┐
-│ Branch Protection (GitHub Settings)        │
-├─────────────────────────────────────────────┤
-│ Hard Security Checks (Pre-merge)           │
-│ • Vulnerability scanning (Bandit)          │
-│ • Secret detection (GitHub native)         │
-│ • Dependency scanning (Safety)             │
-├─────────────────────────────────────────────┤  
-│ Access Controls                             │
-│ • GitHub RBAC integration                   │
-│ • Waiver approval workflow                  │
-│ • Audit trail logging                       │
-└─────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Security["🔐 Multi-Layer Security Architecture"]
+        GitHub[🛡️ Branch Protection<br/>GitHub Settings]
+        
+        subgraph Hard["🚨 Hard Security Checks<br/>Pre-merge Required"]
+            Vuln[🔍 Vulnerability Scanning<br/>Bandit]
+            Secret[🔒 Secret Detection<br/>GitHub Native]
+            Deps[📦 Dependency Scanning<br/>Safety]
+        end
+        
+        subgraph Access["🔑 Access Controls"]
+            RBAC[👥 GitHub RBAC<br/>Integration]
+            Waiver[📋 Waiver Approval<br/>Workflow]
+            Audit[📝 Audit Trail<br/>Logging]
+        end
+        
+        GitHub --> Hard
+        Hard --> Access
+    end
 ```
 
 ### 2. **Waiver Security Controls**
