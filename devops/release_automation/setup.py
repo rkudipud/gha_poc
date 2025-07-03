@@ -310,7 +310,7 @@ def print_usage_guide():
     print("   devops/consistency_checker/waivers.yml - Centralized waiver management")
     print()
     print("🔗 Useful Links:")
-    print("   Documentation: devops/docs/README.md")
+    print("   Documentation: README.md (comprehensive project and DevOps guide)")
     print("   Waiver Guidelines: devops/docs/WAIVERS.md")
     print()
     print("🔧 Environment Variables:")

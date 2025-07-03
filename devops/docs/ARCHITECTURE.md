@@ -7,8 +7,6 @@ This enterprise CI/CD solution is designed for **5000+ developers** with a modul
 ## 🏗️ Core Architecture
 
 ### 1. **Protected Branch Model**
-
-### 1. **Protected Branch Model**
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
 │   Developer     │    │   Feature        │    │   Main Branch   │
@@ -18,7 +16,9 @@ This enterprise CI/CD solution is designed for **5000+ developers** with a modul
 │ git_helper CLI  │    │ Auto Issues      │    │ Auto Merge      │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
 
+```
 
+### 1. **Protected Branch Model**
 ```mermaid
 flowchart LR
     Dev[👨‍💻 Developer<br/>Workstation]
@@ -29,8 +29,6 @@ flowchart LR
     Feature --> |Branch Lint<br/>Auto Issues| Main
     Main --> |PR Validation<br/>Auto Merge| Main
 ```
-
-### 2. **Validation Pipeline**
 
 ### 2. **Validation Pipeline**
 ```
@@ -58,6 +56,8 @@ Push to Branch
 │ • Auto Decision │ (Merge/Review/Block)
 └─────────────────┘
 
+```
+### 2. **Validation Pipeline**
 
 ```mermaid
 flowchart TD
