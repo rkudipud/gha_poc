@@ -1,47 +1,194 @@
 # Pre-commit Hook Guide
 
-The pre-commit hook in this repository helps maintain code quality by automatically checking for:
+## Overview
 
-1. Python syntax errors
-2. Large files (>10MB)
-3. Potential secrets in the code
+The pre-commit hook provides local validation before commits reach the remote repository. It performs essential checks to maintain code quality and prevent common issues.
 
 ## Features
 
-- **Adaptive Python Interpreter Detection**: The hook automatically finds the available Python interpreter (`python3`, `python`, or `python2`).
-- **Smart Secret Detection**: Reduces false positives when detecting potential secrets.
-- **Graceful Degradation**: If no Python interpreter is available, the hook will skip Python syntax checks.
+- **Python Syntax Checking**: Validates Python syntax errors before commit
+- **Large File Detection**: Prevents commits of files larger than 10MB
+- **Secret Detection**: Basic pattern matching for potential secrets
+- **Configurable**: Can be enabled/disabled via environment variable
+- **Smart Python Detection**: Automatically detects available Python interpreter
 
-## Bypassing the Pre-commit Hook
+## Installation
 
-In cases where you need to bypass the pre-commit hook (for example, when you have a false positive for secret detection), you can set the `GIT_SKIP_VERIFY` environment variable:
+The pre-commit hook is automatically installed by the setup script:
 
 ```bash
-# For tcsh shell
-setenv GIT_SKIP_VERIFY 1
+# Install during setup
+python devops/release_automation/setup.py
+
+# Install without other setup components
+python devops/release_automation/setup.py --no-alias
+
+# Skip hook installation
+python devops/release_automation/setup.py --no-hooks
+
+# Check current setup
+python devops/release_automation/setup.py --check
+```
+
+## Configuration
+
+### Environment Variables
+
+#### `DISABLE_PRECOMMIT_HOOK`
+Controls whether the pre-commit hook runs:
+
+```bash
+# Disable the hook temporarily
+export DISABLE_PRECOMMIT_HOOK=true
 git commit -m "Your commit message"
-unsetenv GIT_SKIP_VERIFY  # Don't forget to unset after use
+
+# Disable permanently (add to shell profile)
+echo 'export DISABLE_PRECOMMIT_HOOK=true' >> ~/.bashrc
+
+# Re-enable the hook
+unset DISABLE_PRECOMMIT_HOOK
+# or
+export DISABLE_PRECOMMIT_HOOK=false
 ```
 
+**Values**: 
+- `true` or `1` = Hook disabled
+- `false`, `0`, or unset = Hook enabled (default)
+
+## What the Hook Checks
+
+### 1. Python Syntax Validation
+- Compiles all staged Python files (`*.py`)
+- Prevents commits with syntax errors
+- Uses the available Python interpreter (`python3` or `python`)
+
+### 2. Large File Detection
+- Scans for files larger than 10MB
+- Suggests using Git LFS for large files
+- Prevents accidental commits of binary/large files
+
+### 3. Secret Detection
+- Basic pattern matching for common secret patterns
+- Interactive prompt to confirm if patterns are detected
+- Case-insensitive matching
+
+## Usage Examples
+
+### Normal Commit (Hook Enabled)
 ```bash
-# For bash/sh
-GIT_SKIP_VERIFY=1 git commit -m "Your commit message"
+git add my_file.py
+git commit -m "Add new feature"
+# Output:
+# 🔍 Running pre-commit checks...
+# ✅ Pre-commit checks passed
 ```
 
-## When Secret Detection is Triggered
+### Commit with Issues
+```bash
+git add broken_file.py
+git commit -m "Add broken code"
+# Output:
+# 🔍 Running pre-commit checks...
+# ❌ Python syntax error in broken_file.py
+# (commit blocked)
+```
+
+### Temporarily Disable Hook
+```bash
+export DISABLE_PRECOMMIT_HOOK=true
+git commit -m "Emergency fix"
+# Output:
+# 💡 Pre-commit hook disabled via DISABLE_PRECOMMIT_HOOK environment variable
+```
 
 
-
-## Recommendations
-
-- **Never commit actual secrets**: Use environment variables or secure vaults
-- **Review carefully**: When the hook flags a potential secret, carefully review if it's actually sensitive
-- **Bypass only when necessary**: Only use `GIT_SKIP_VERIFY=1` when you're certain there are no real secrets
 
 ## Troubleshooting
 
-If you encounter issues with the pre-commit hook:
+### Hook Not Running
+```bash
+# Check if hook file exists and is executable
+ls -la .git/hooks/pre-commit
 
-1. Check if the correct Python interpreter is available in your environment
-2. Ensure the hook is executable (`chmod +x .git/hooks/pre-commit`)
-3. For persistent false positives, consider updating the regex pattern in `.git/hooks/pre-commit`
+# Reinstall the hook
+python devops/release_automation/setup.py --force
+
+# Check if disabled via environment
+echo $DISABLE_PRECOMMIT_HOOK
+```
+
+### Python Interpreter Issues
+The hook automatically detects the correct Python interpreter:
+1. First tries `python3`
+2. Falls back to `python`
+3. Fails if neither is available
+
+```bash
+# Check available Python interpreters
+which python3
+which python
+
+# Manual hook test
+.git/hooks/pre-commit
+```
+
+### False Secret Detection
+If the hook detects false positives for secrets:
+
+1. **Temporary bypass**: Answer 'y' when prompted
+2. **Permanent fix**: Update the pattern in `setup.py` and reinstall
+3. **Disable check**: Temporarily disable the hook
+
+### Performance Issues
+For repositories with many Python files:
+
+```bash
+# Disable hook for large commits
+DISABLE_PRECOMMIT_HOOK=true git commit -m "Large refactor"
+
+# Or commit in smaller chunks
+git add file1.py file2.py
+git commit -m "Part 1: Add feature"
+```
+
+## Setup Script Integration
+
+The pre-commit hook is generated by `setup.py`. To modify the hook:
+
+1. **Edit the hook template** in `setup.py` (in the `setup_git_hooks()` function)
+2. **Reinstall the hook**:
+   ```bash
+   python devops/release_automation/setup.py --force
+   ```
+
+### Auto-Detection Features
+
+The setup script now includes intelligent auto-detection:
+
+- **GitHub Repository**: Automatically detects owner/repo from Git remote
+- **User Information**: Gets name and email from Git config
+- **Python Interpreter**: Finds the best available Python command
+
+## Best Practices
+
+1. **Keep Hook Enabled**: Only disable when absolutely necessary
+2. **Fix Issues Locally**: Address problems before committing
+3. **Use Consistency Checker**: Run `python devops/consistency_checker/checker.py` before committing
+4. **Regular Updates**: Reinstall hook when setup.py is updated
+5. **Team Coordination**: Ensure all team members have the hook installed
+
+## Integration with CI/CD
+
+The pre-commit hook works with the broader CI/CD system:
+
+- **Local Hook** → **Branch CI** → **PR Validation**
+- Catches issues early in the development cycle
+- Reduces CI/CD failures and iteration time
+- Maintains consistent code quality standards
+
+---
+
+**Environment Variable**: `DISABLE_PRECOMMIT_HOOK=true` to disable  
+**Installation**: Automatic via `setup.py`  
+**Manual Test**: `.git/hooks/pre-commit`  
+**Setup Check**: `python devops/release_automation/setup.py --check`

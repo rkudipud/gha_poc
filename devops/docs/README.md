@@ -140,11 +140,96 @@ devops/
 | **Setup development environment** | `python devops/release_automation/setup.py` | [Setup Guide](setup.md) |
 | **Manage waivers** | Edit `devops/consistency_checker/waivers.yml` | [Waivers System](WAIVERS.md) |
 
-## 🆘 Getting Help
+## 🆘 Troubleshooting
+
+### Common Issues
+
+#### Local Checks Failing
+```bash
+# Check what's failing
+python devops/consistency_checker/checker.py --verbose
+
+# Add waiver for specific issue
+edit devops/consistency_checker/waivers.yml
+
+# Disable specific rule temporarily
+edit devops/consistency_checker/checker_config.yml
+```
+
+#### Pre-commit Hook Issues
+```bash
+# Disable hook temporarily
+DISABLE_PRECOMMIT_HOOK=true git commit -m "Your message"
+
+# Disable permanently (tcsh)
+setenv DISABLE_PRECOMMIT_HOOK true
+
+# Disable permanently (bash/zsh)
+export DISABLE_PRECOMMIT_HOOK=true
+
+# Re-enable (tcsh)
+unsetenv DISABLE_PRECOMMIT_HOOK
+
+# Re-enable (bash/zsh)
+unset DISABLE_PRECOMMIT_HOOK
+
+# Emergency bypass (skips all hooks)
+git commit --no-verify -m "Emergency commit"
+```
+
+#### PR Validation Blocked
+```bash
+# Check PR validation details in GitHub Actions
+# Adjust thresholds if needed
+edit .github/pr-test-config.yml
+
+# Check specific test results
+grep -A 10 "Test Results" .github/workflows/pr-validation.yml
+```
+
+#### Git Helper Issues
+```bash
+# Check configuration
+python devops/release_automation/git_helper.py --check-config
+
+# Reset configuration
+python devops/release_automation/git_helper.py --reset-config
+```
+
+### Environment Variables
+
+#### Global Controls
+- `DISABLE_PRECOMMIT_HOOK=true` - Disables the pre-commit hook entirely
+
+### Getting Help
 
 1. **Check the relevant documentation** using the index above
 2. **Run tools with `--help`** flag for command-specific help
 3. **Review configuration examples** in the documentation
 4. **Check troubleshooting sections** in each guide
+
+---
+
+## 🔄 Workflow Overview
+
+```mermaid
+graph LR
+    A[📝 Code Changes] --> B[🔍 Local Checks]
+    B --> C[📤 Push Branch]
+    C --> D[🤖 Branch CI]
+    D --> E[🔄 Create PR]
+    E --> F[🚀 PR Validation]
+    F --> G{📊 Score}
+    G -->|≥85%| H[✅ Auto-Merge]
+    G -->|65-84%| I[👀 Review]
+    G -->|<65%| J[❌ Block]
+```
+
+This system ensures high code quality while maintaining developer productivity through automation and clear feedback loops.
+
+---
+
+**Last Updated**: July 3, 2025  
+**Support**: For issues or questions, check the troubleshooting section or review component-specific documentation above.
 
 
