@@ -1,0 +1,8 @@
+#!/usr/intel/bin/tcsh -f
+
+echo "Making the virtual environment"
+./make_venv.csh
+
+echo "Removing the 'tests' directory"
+rm -rf global/tests
+

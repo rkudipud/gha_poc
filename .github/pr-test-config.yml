@@ -1,0 +1,328 @@
+# ==============================================================================
+# PR Test Suite Configuration
+# ==============================================================================
+# This file defines the modular test framework for PR validation.
+# Teams can customize tests, weights, thresholds, and enforcement rules.
+#
+# Configuration Format:
+# - Each test has a unique ID, weight, and enforcement level
+# - Hard checks must pass (failure blocks PR)
+# - Soft checks contribute to overall score
+# - Thresholds determine auto-merge vs manual review
+#
+# Last Updated: July 2, 2025
+# ==============================================================================
+
+# Global Configuration
+global_config:
+  # Overall scoring thresholds
+  auto_merge_threshold: 85    # Score >= 85% = Auto-merge approved
+  manual_review_threshold: 65 # Score 65-84% = Manual review required
+  block_threshold: 64         # Score <= 64% = Block merge
+  
+  # Timeout settings (minutes)
+  max_test_timeout: 30
+  parallel_execution: true
+  
+  # Notification settings
+  notify_on_failure: true
+  create_issues_on_hard_failure: true
+
+# Test Suite Definition
+test_suite:
+  # ==============================================================================
+  # HARD CHECKS - Must pass for PR to be mergeable
+  # ==============================================================================
+  
+  - id: "security_critical"
+    name: "Critical Security Scan"
+    description: "SAST scan for critical vulnerabilities"
+    weight: 0  # Hard check - no weight contribution
+    enforcement: "hard"
+    action_path: ".github/actions/security-scan"
+    timeout_minutes: 15
+    inputs:
+      severity_threshold: "critical"
+      fail_on_high: true
+    outputs_required:
+      - security_score
+      - vulnerabilities_found
+    
+  - id: "branch_protection"
+    name: "Branch Protection Compliance"
+    description: "Verify branch follows protection rules"
+    weight: 0
+    enforcement: "hard"
+    action_path: ".github/actions/branch-protection-check"
+    timeout_minutes: 5
+    inputs:
+      check_commits: true
+      check_signatures: false
+    
+  - id: "license_compliance"
+    name: "License Compliance Check"
+    description: "Ensure all dependencies have approved licenses"
+    weight: 0
+    enforcement: "hard"
+    action_path: ".github/actions/license-check"
+    timeout_minutes: 10
+    inputs:
+      approved_licenses: "MIT,Apache-2.0,BSD-3-Clause"
+      scan_dependencies: true
+
+  # ==============================================================================
+  # WEIGHTED CHECKS - Contribute to overall score
+  # ==============================================================================
+  
+  - id: "python_lint_enhanced"
+    name: "Enhanced Python Linting"
+    description: "Comprehensive Python code quality analysis"
+    weight: 25
+    enforcement: "soft"
+    action_path: ".github/actions/python-lint-enhanced"
+    timeout_minutes: 10
+    inputs:
+      changed-only: true
+      enable-waivers: true
+      linters: "flake8,pylint"
+      fail-on-warnings: false
+    outputs_required:
+      - score
+      - lint-result
+    score_mapping:
+      # Maps action output to 0-100 score
+      output_field: "score"
+      min_score: 0
+      max_score: 100
+
+  - id: "code_coverage"
+    name: "Code Coverage Analysis"
+    description: "Unit test coverage measurement"
+    weight: 20
+    enforcement: "soft"
+    action_path: ".github/actions/coverage-check"
+    timeout_minutes: 15
+    inputs:
+      minimum_coverage: 70
+      coverage_type: "line"
+      generate_report: true
+    outputs_required:
+      - coverage_percentage
+      - lines_covered
+    score_mapping:
+      output_field: "coverage_percentage"
+      min_score: 0
+      max_score: 100
+      
+  - id: "security_scan_soft"
+    name: "Security Vulnerability Scan"
+    description: "Non-critical security analysis"
+    weight: 15
+    enforcement: "soft"
+    action_path: ".github/actions/security-scan"
+    timeout_minutes: 12
+    inputs:
+      severity_threshold: "medium"
+      fail_on_high: false
+    outputs_required:
+      - security_score
+    score_mapping:
+      output_field: "security_score"
+      min_score: 0
+      max_score: 100
+
+  - id: "documentation_check"
+    name: "Documentation Quality"
+    description: "README, docstrings, and changelog validation"
+    weight: 15
+    enforcement: "soft"
+    action_path: ".github/actions/docs-check"
+    timeout_minutes: 8
+    inputs:
+      check_readme: true
+      check_docstrings: true
+      check_changelog: true
+    outputs_required:
+      - docs_score
+    score_mapping:
+      output_field: "docs_score"
+      min_score: 0
+      max_score: 100
+
+  - id: "performance_test"
+    name: "Performance Regression Test"
+    description: "Check for performance regressions"
+    weight: 10
+    enforcement: "soft"
+    action_path: ".github/actions/performance-test"
+    timeout_minutes: 20
+    inputs:
+      baseline_branch: "main"
+      regression_threshold: 10  # 10% slowdown allowed
+    outputs_required:
+      - performance_score
+    score_mapping:
+      output_field: "performance_score"
+      min_score: 0
+      max_score: 100
+
+  - id: "consistency_check"
+    name: "Code Consistency Rules"
+    description: "Custom consistency rules validation"
+    weight: 10
+    enforcement: "soft"
+    action_path: ".github/actions/consistency-check"
+    timeout_minutes: 8
+    inputs:
+      run_all_rules: true
+      auto_fix: false
+    outputs_required:
+      - consistency_score
+    score_mapping:
+      output_field: "consistency_score"
+      min_score: 0
+      max_score: 100
+
+  - id: "integration_tests"
+    name: "Integration Test Suite"
+    description: "End-to-end integration testing"
+    weight: 5
+    enforcement: "soft"
+    action_path: ".github/actions/integration-tests"
+    timeout_minutes: 25
+    inputs:
+      test_environment: "staging"
+      parallel_execution: true
+    outputs_required:
+      - test_score
+      - tests_passed
+      - tests_total
+    score_mapping:
+      output_field: "test_score"
+      min_score: 0
+      max_score: 100
+
+# ==============================================================================
+# Test Dependencies and Execution Order
+# ==============================================================================
+execution_config:
+  # Tests that can run in parallel
+  parallel_groups:
+    - ["python_lint_enhanced", "documentation_check", "consistency_check"]
+    - ["code_coverage", "integration_tests"]
+    - ["security_scan_soft", "performance_test"]
+  
+  # Tests that must run sequentially (dependencies)
+  sequential_dependencies:
+    - prerequisite: "branch_protection"
+      dependents: ["security_critical", "license_compliance"]
+    - prerequisite: "python_lint_enhanced"
+      dependents: ["code_coverage"]
+
+# ==============================================================================
+# Custom Action Templates
+# ==============================================================================
+# These templates help generate new actions quickly
+action_templates:
+  basic_check:
+    structure: |
+      name: "{{action_name}}"
+      description: "{{action_description}}"
+      inputs:
+        timeout:
+          description: 'Test timeout in minutes'
+          required: false
+          default: '10'
+      outputs:
+        result:
+          description: 'Test result (pass/fail)'
+        score:
+          description: 'Numerical score (0-100)'
+      runs:
+        using: 'composite'
+        steps:
+          - name: Run {{action_name}}
+            shell: bash
+            run: |
+              echo "Implementing {{action_name}}..."
+              # Custom implementation here
+
+# ==============================================================================
+# Environment-Specific Overrides
+# ==============================================================================
+environment_overrides:
+  # Development environment (less strict)
+  development:
+    global_config:
+      auto_merge_threshold: 75
+      manual_review_threshold: 60
+    test_overrides:
+      - id: "security_critical"
+        enforcement: "soft"  # Relaxed for dev
+      - id: "performance_test"
+        weight: 5  # Reduced weight
+  
+  # Production environment (more strict)
+  production:
+    global_config:
+      auto_merge_threshold: 90
+      manual_review_threshold: 75
+    test_overrides:
+      - id: "license_compliance"
+        timeout_minutes: 20  # More thorough check
+      - id: "security_scan_soft"
+        weight: 20  # Increased importance
+
+# ==============================================================================
+# Notification Configuration
+# ==============================================================================
+notifications:
+  # GitHub issue creation on failures
+  issue_templates:
+    hard_failure:
+      title: "🚨 Hard Check Failure: {{test_name}} - PR #{{pr_number}}"
+      labels: ["ci-failure", "urgent", "{{test_id}}"]
+      assignees: ["@{{pr_author}}"]
+      body: |
+        **Hard Check Failed**: {{test_name}}
+        
+        **PR**: #{{pr_number}} - {{pr_title}}
+        **Author**: @{{pr_author}}
+        **Branch**: {{head_branch}} → {{base_branch}}
+        **Failed Test**: {{test_id}}
+        
+        **Failure Details**:
+        {{failure_details}}
+        
+        **Action Required**:
+        This is a hard check failure. The PR cannot be merged until this issue is resolved.
+        
+        **Next Steps**:
+        1. Review the failure details above
+        2. Fix the underlying issue
+        3. Push new commits to trigger re-validation
+        4. This issue will auto-close when checks pass
+
+  # Slack/Teams integration (optional)
+  webhook_notifications:
+    enabled: false
+    webhook_url: ""  # Set in GitHub secrets
+    channels:
+      hard_failures: "#critical-alerts"
+      soft_failures: "#code-quality"
+
+# ==============================================================================
+# Reporting and Analytics
+# ==============================================================================
+reporting:
+  # Generate detailed reports
+  enable_reports: true
+  report_formats: ["json", "html", "markdown"]
+  
+  # Store results for analytics
+  store_results: true
+  retention_days: 30
+  
+  # Trend analysis
+  track_trends: true
+  baseline_period_days: 14

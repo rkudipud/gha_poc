@@ -1,0 +1,550 @@
+name: "Enhanced Python Linting with Waivers"
+description: "Advanced Python linting with waiver support, multiple linters, and performance optimization"
+
+inputs:
+  changed-only:
+    description: 'Whether to lint only changed files'
+    required: false
+    default: 'true'
+  python-version:
+    description: 'Python version to use'
+    required: false
+    default: '3.11.1'
+  enable-waivers:
+    description: 'Enable waiver mechanism for lint exceptions'
+    required: false
+    default: 'true'
+  linters:
+    description: 'Comma-separated list of linters to run (flake8,pylint,mypy)'
+    required: false
+    default: 'flake8'
+  fail-on-warnings:
+    description: 'Fail the action on warnings (not just errors)'
+    required: false
+    default: 'false'
+
+outputs:
+  lint-result:
+    description: 'Overall result of the linting check (pass/fail/warning)'
+    value: ${{ steps.final_result.outputs.result }}
+  score:
+    description: 'Numerical score (0-100) based on lint results'
+    value: ${{ steps.calculate_score.outputs.score }}
+  log-path:
+    description: 'Path to the main verbose lint log file'
+    value: './enhanced_lint_results.log'
+  stats-log-path:
+    description: 'Path to the statistics lint log file'
+    value: './enhanced_lint_stats.log'
+  waiver-log-path:
+    description: 'Path to the waiver application log'
+    value: './waiver_log.json'
+  changed-files:
+    description: 'List of Python files that were processed'
+    value: ${{ steps.get_files.outputs.changed-files }}
+
+runs:
+  using: 'composite'
+  steps:
+    # Setup Python environment
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    # Install linting tools
+    - name: Install linting dependencies
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        
+        # Install base linters
+        pip install flake8 flake8-bugbear flake8-docstrings flake8-import-order
+        
+        # Install additional linters based on input
+        if [[ "${{ inputs.linters }}" == *"pylint"* ]]; then
+          pip install pylint
+        fi
+        
+        if [[ "${{ inputs.linters }}" == *"mypy"* ]]; then
+          pip install mypy
+        fi
+        
+        # Install waiver processing dependencies
+        pip install pyyaml
+
+    # Get list of files to process
+    - name: Get files to process
+      id: get_files
+      shell: bash
+      run: |
+        if [[ "${{ inputs.changed-only }}" == "true" ]]; then
+          # Get changed Python files
+          if [[ -n "${{ github.event.before }}" ]] && [[ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]]; then
+            # For push events
+            CHANGED_FILES=$(git diff --name-only --diff-filter=ACMRT ${{ github.event.before }} ${{ github.sha }} | grep '\.py$' || echo "")
+          else
+            # For PR events or initial commits
+            CHANGED_FILES=$(git diff --name-only --diff-filter=ACMRT HEAD~1 HEAD | grep '\.py$' || echo "")
+          fi
+          
+          if [[ -z "$CHANGED_FILES" ]]; then
+            echo "No Python files changed"
+            echo "changed-files=" >> $GITHUB_OUTPUT
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "Processing changed files: $CHANGED_FILES"
+            echo "changed-files=$CHANGED_FILES" >> $GITHUB_OUTPUT
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "Processing all Python files"
+          ALL_PY_FILES=$(find . -name "*.py" -not -path "./.git/*" -not -path "./venv/*" -not -path "./.venv/*" | tr '\n' ' ')
+          echo "changed-files=$ALL_PY_FILES" >> $GITHUB_OUTPUT
+          echo "skip=false" >> $GITHUB_OUTPUT
+        fi
+
+    # Load and validate waivers
+    - name: Process waivers
+      id: process_waivers
+      if: steps.get_files.outputs.skip == 'false' && inputs.enable-waivers == 'true'
+      shell: bash
+      run: |
+        python3 << 'EOF'
+        import yaml
+        import json
+        import os
+        from datetime import datetime
+        
+        # Use centralized waiver file
+        waiver_file = 'consistency_checker/waivers.yml'
+        waiver_log = {
+            'processed_at': datetime.now().isoformat(),
+            'waivers_applied': [],
+            'expired_waivers': [],
+            'invalid_waivers': []
+        }
+        
+        if os.path.exists(waiver_file):
+            try:
+                with open(waiver_file, 'r') as f:
+                    waivers_config = yaml.safe_load(f)
+                
+                # Load centralized waiver format
+                all_waivers = []
+                
+                # Rule-based waivers
+                if 'rule_waivers' in waivers_config:
+                    all_waivers.extend(waivers_config['rule_waivers'])
+                # Bulk waivers
+                if 'bulk_waivers' in waivers_config:
+                    # Convert bulk waivers to individual waivers for processing
+                    for bulk_waiver in waivers_config['bulk_waivers']:
+                        pattern = bulk_waiver.get('pattern', '')
+                        rules = bulk_waiver.get('rules', [])
+                        if rules == '*' or 'all' in rules:
+                            rules = ['*']  # All rules
+                        elif isinstance(rules, str):
+                            rules = [rules]
+                        
+                        for rule in rules:
+                            all_waivers.append({
+                                'file': pattern,
+                                'rule': rule,
+                                'reason': bulk_waiver.get('reason', ''),
+                                'approved_by': bulk_waiver.get('approved_by', ''),
+                                'expires': bulk_waiver.get('expires')
+                            })
+                
+                current_date = datetime.now().date()
+                
+                for waiver in all_waivers:
+                    # Validate waiver structure
+                    required_fields = ['file', 'rule', 'reason', 'approved_by']
+                    if not all(field in waiver for field in required_fields):
+                        waiver_log['invalid_waivers'].append({
+                            'waiver': waiver,
+                            'reason': 'Missing required fields'
+                        })
+                        continue
+                    
+                    # Check expiration
+                    if 'expires' in waiver:
+                        try:
+                            expire_date = datetime.strptime(waiver['expires'], '%Y-%m-%d').date()
+                            if current_date > expire_date:
+                                waiver_log['expired_waivers'].append(waiver)
+                                continue
+                        except ValueError:
+                            waiver_log['invalid_waivers'].append({
+                                'waiver': waiver,
+                                'reason': 'Invalid expiration date format'
+                            })
+                            continue
+                    
+                    waiver_log['waivers_applied'].append(waiver)
+                
+                print(f"✅ Processed {len(waiver_log['waivers_applied'])} valid waivers")
+                if waiver_log['expired_waivers']:
+                    print(f"⚠️ Found {len(waiver_log['expired_waivers'])} expired waivers")
+                if waiver_log['invalid_waivers']:
+                    print(f"❌ Found {len(waiver_log['invalid_waivers'])} invalid waivers")
+                    
+            except Exception as e:
+                print(f"❌ Error processing waivers: {e}")
+                waiver_log['error'] = str(e)
+        else:
+            print("ℹ️ No waiver file found (consistency_checker/waivers.yml)")
+        
+        # Save waiver log
+        with open('./waiver_log.json', 'w') as f:
+            json.dump(waiver_log, f, indent=2)
+        EOF
+
+    # Run Flake8 linting
+    - name: Run Flake8
+      id: flake8
+      if: steps.get_files.outputs.skip == 'false' && contains(inputs.linters, 'flake8')
+      shell: bash
+      run: |
+        FILES="${{ steps.get_files.outputs.changed-files }}"
+        
+        if [[ -n "$FILES" ]]; then
+          echo "🔍 Running Flake8 on: $FILES"
+          
+          # Run flake8 with detailed output
+          flake8 $FILES \
+            --config=./.github/actions/python-lint/.flake8 \
+            --output-file=./flake8_results.log \
+            --statistics \
+            --tee || true
+          
+          # Also generate machine-readable output
+          flake8 $FILES \
+            --config=./.github/actions/python-lint/.flake8 \
+            --format='%(path)s:%(row)d:%(col)d:%(code)s:%(text)s' \
+            --output-file=./flake8_machine.log || true
+          
+          echo "flake8_completed=true" >> $GITHUB_OUTPUT
+        else
+          echo "flake8_completed=false" >> $GITHUB_OUTPUT
+        fi
+
+    # Run Pylint (if enabled)
+    - name: Run Pylint
+      id: pylint
+      if: steps.get_files.outputs.skip == 'false' && contains(inputs.linters, 'pylint')
+      shell: bash
+      run: |
+        FILES="${{ steps.get_files.outputs.changed-files }}"
+        
+        if [[ -n "$FILES" ]]; then
+          echo "🔍 Running Pylint on: $FILES"
+          
+          pylint $FILES \
+            --output-format=text \
+            --reports=yes \
+            --score=yes > ./pylint_results.log 2>&1 || true
+          
+          # Extract score
+          PYLINT_SCORE=$(grep "Your code has been rated at" ./pylint_results.log | grep -o '[0-9]*\.[0-9]*' | head -1 || echo "5.0")
+          echo "pylint_score=$PYLINT_SCORE" >> $GITHUB_OUTPUT
+          echo "pylint_completed=true" >> $GITHUB_OUTPUT
+        else
+          echo "pylint_completed=false" >> $GITHUB_OUTPUT
+        fi
+
+    # Run MyPy (if enabled)
+    - name: Run MyPy
+      id: mypy
+      if: steps.get_files.outputs.skip == 'false' && contains(inputs.linters, 'mypy')
+      shell: bash
+      run: |
+        FILES="${{ steps.get_files.outputs.changed-files }}"
+        
+        if [[ -n "$FILES" ]]; then
+          echo "🔍 Running MyPy on: $FILES"
+          
+          mypy $FILES \
+            --ignore-missing-imports \
+            --show-error-codes \
+            --show-error-context > ./mypy_results.log 2>&1 || true
+          
+          echo "mypy_completed=true" >> $GITHUB_OUTPUT
+        else
+          echo "mypy_completed=false" >> $GITHUB_OUTPUT
+        fi
+
+    # Apply waivers to results
+    - name: Apply waivers
+      id: apply_waivers
+      if: steps.get_files.outputs.skip == 'false' && inputs.enable-waivers == 'true'
+      shell: bash
+      run: |
+        python3 << 'EOF'
+        import yaml
+        import json
+        import re
+        import os
+        import fnmatch
+        from datetime import datetime
+        
+        # Load waiver log
+        waiver_log = {}
+        if os.path.exists('./waiver_log.json'):
+            with open('./waiver_log.json', 'r') as f:
+                waiver_log = json.load(f)
+        
+        # Load enhanced waivers
+        enhanced_waivers = {'rule_waivers': [], 'line_waivers': [], 'bulk_waivers': []}
+        # Load waivers from centralized location
+        waiver_config = {}
+        waiver_file = 'consistency_checker/waivers.yml'
+        
+        if os.path.exists(waiver_file):
+            try:
+                with open(waiver_file, 'r') as f:
+                    waiver_config = yaml.safe_load(f) or {}
+                    enhanced_waivers.update(waiver_config)
+            except Exception as e:
+                print(f"Error loading enhanced waivers: {e}")
+        
+        # Process flake8 results
+        if os.path.exists('./flake8_machine.log'):
+            with open('./flake8_machine.log', 'r') as f:
+                flake8_lines = f.readlines()
+            
+            filtered_lines = []
+            waived_count = 0
+            
+            for line in flake8_lines:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                parts = line.split(':')
+                if len(parts) >= 4:
+                    file_path = parts[0]
+                    line_num = parts[1]
+                    rule_code = parts[3]
+                    
+                    waived = False
+                    waiver_reason = ""
+                    
+                    # Check line-specific waivers first (most specific)
+                    for waiver in enhanced_waivers.get('line_waivers', []):
+                        violation_line = waiver.get('violation_line', '')
+                        if violation_line and violation_line in line:
+                            # Check expiration
+                            if waiver.get('expires'):
+                                try:
+                                    expire_date = datetime.strptime(waiver['expires'], '%Y-%m-%d').date()
+                                    if datetime.now().date() > expire_date:
+                                        continue
+                                except ValueError:
+                                    continue
+                            
+                            waived = True
+                            waiver_reason = f"Line-specific waiver: {waiver.get('reason', 'No reason')}"
+                            break
+                    
+                    # Check rule-based waivers
+                    if not waived:
+                        for waiver in enhanced_waivers.get('rule_waivers', []):
+                            if (waiver.get('file') in file_path and 
+                                waiver.get('rule') == rule_code):
+                                # Check expiration
+                                if waiver.get('expires'):
+                                    try:
+                                        expire_date = datetime.strptime(waiver['expires'], '%Y-%m-%d').date()
+                                        if datetime.now().date() > expire_date:
+                                            continue
+                                    except ValueError:
+                                        continue
+                                
+                                waived = True
+                                waiver_reason = f"Rule waiver: {waiver.get('reason', 'No reason')}"
+                                break
+                    
+                    # Check bulk waivers
+                    if not waived:
+                        for waiver in enhanced_waivers.get('bulk_waivers', []):
+                            if waiver.get('rule') == rule_code:
+                                pattern = waiver.get('pattern', '')
+                                if fnmatch.fnmatch(file_path, pattern):
+                                    # Check expiration
+                                    if waiver.get('expires'):
+                                        try:
+                                            expire_date = datetime.strptime(waiver['expires'], '%Y-%m-%d').date()
+                                            if datetime.now().date() > expire_date:
+                                                continue
+                                        except ValueError:
+                                            continue
+                                    
+                                    waived = True
+                                    waiver_reason = f"Bulk waiver: {waiver.get('reason', 'No reason')}"
+                                    break
+                    
+                    if waived:
+                        waived_count += 1
+                        print(f"✅ Waived {rule_code} in {file_path}:{line_num} - {waiver_reason}")
+                    else:
+                        filtered_lines.append(line + '\n')
+            
+            # Write filtered results
+            with open('./flake8_filtered.log', 'w') as f:
+                f.writelines(filtered_lines)
+            
+            print(f"📝 Applied {waived_count} waivers to flake8 results")
+            print(f"remaining_issues={len(filtered_lines)}", file=open(os.environ['GITHUB_OUTPUT'], 'a'))
+        else:
+            print(f"remaining_issues=0", file=open(os.environ['GITHUB_OUTPUT'], 'a'))
+        EOF
+
+    # Generate consolidated report
+    - name: Generate consolidated report
+      id: consolidate
+      if: steps.get_files.outputs.skip == 'false'
+      shell: bash
+      run: |
+        echo "📋 Generating consolidated lint report..."
+        
+        # Create consolidated report
+        cat > ./enhanced_lint_results.log << 'EOF'
+        ================================================================================
+        Enhanced Python Linting Report
+        ================================================================================
+        Generated: $(date)
+        Files processed: ${{ steps.get_files.outputs.changed-files }}
+        Linters used: ${{ inputs.linters }}
+        Waivers enabled: ${{ inputs.enable-waivers }}
+        
+        EOF
+        
+        # Add Flake8 results
+        if [[ "${{ steps.flake8.outputs.flake8_completed }}" == "true" ]]; then
+          echo "=== FLAKE8 RESULTS ===" >> ./enhanced_lint_results.log
+          
+          if [[ "${{ inputs.enable-waivers }}" == "true" ]] && [[ -f "./flake8_filtered.log" ]]; then
+            cat ./flake8_filtered.log >> ./enhanced_lint_results.log
+          elif [[ -f "./flake8_results.log" ]]; then
+            cat ./flake8_results.log >> ./enhanced_lint_results.log
+          fi
+          
+          echo "" >> ./enhanced_lint_results.log
+        fi
+        
+        # Add Pylint results
+        if [[ "${{ steps.pylint.outputs.pylint_completed }}" == "true" ]] && [[ -f "./pylint_results.log" ]]; then
+          echo "=== PYLINT RESULTS ===" >> ./enhanced_lint_results.log
+          cat ./pylint_results.log >> ./enhanced_lint_results.log
+          echo "" >> ./enhanced_lint_results.log
+        fi
+        
+        # Add MyPy results
+        if [[ "${{ steps.mypy.outputs.mypy_completed }}" == "true" ]] && [[ -f "./mypy_results.log" ]]; then
+          echo "=== MYPY RESULTS ===" >> ./enhanced_lint_results.log
+          cat ./mypy_results.log >> ./enhanced_lint_results.log
+          echo "" >> ./enhanced_lint_results.log
+        fi
+        
+        # Generate statistics
+        TOTAL_ISSUES=0
+        if [[ -f "./flake8_filtered.log" ]]; then
+          FLAKE8_ISSUES=$(wc -l < ./flake8_filtered.log)
+          TOTAL_ISSUES=$((TOTAL_ISSUES + FLAKE8_ISSUES))
+        elif [[ -f "./flake8_machine.log" ]]; then
+          FLAKE8_ISSUES=$(wc -l < ./flake8_machine.log)
+          TOTAL_ISSUES=$((TOTAL_ISSUES + FLAKE8_ISSUES))
+        fi
+        
+        echo "=== SUMMARY ===" > ./enhanced_lint_stats.log
+        echo "Total issues found: $TOTAL_ISSUES" >> ./enhanced_lint_stats.log
+        if [[ "${{ inputs.enable-waivers }}" == "true" ]]; then
+          WAIVED_COUNT="${{ steps.apply_waivers.outputs.remaining_issues }}"
+          echo "Issues after waivers: $WAIVED_COUNT" >> ./enhanced_lint_stats.log
+        fi
+        
+        echo "total_issues=$TOTAL_ISSUES" >> $GITHUB_OUTPUT
+
+    # Calculate numerical score
+    - name: Calculate score
+      id: calculate_score
+      if: steps.get_files.outputs.skip == 'false'
+      shell: bash
+      run: |
+        TOTAL_ISSUES=${{ steps.consolidate.outputs.total_issues }}
+        PYLINT_SCORE=${{ steps.pylint.outputs.pylint_score || '8.0' }}
+        
+        # Base score calculation
+        if [[ $TOTAL_ISSUES -eq 0 ]]; then
+          BASE_SCORE=100
+        elif [[ $TOTAL_ISSUES -le 5 ]]; then
+          BASE_SCORE=85
+        elif [[ $TOTAL_ISSUES -le 10 ]]; then
+          BASE_SCORE=70
+        elif [[ $TOTAL_ISSUES -le 20 ]]; then
+          BASE_SCORE=50
+        else
+          BASE_SCORE=25
+        fi
+        
+        # Adjust for Pylint score if available
+        if [[ "${{ steps.pylint.outputs.pylint_completed }}" == "true" ]]; then
+          PYLINT_PERCENTAGE=$(echo "$PYLINT_SCORE * 10" | bc -l)
+          FINAL_SCORE=$(echo "($BASE_SCORE * 0.7) + ($PYLINT_PERCENTAGE * 0.3)" | bc -l)
+        else
+          FINAL_SCORE=$BASE_SCORE
+        fi
+        
+        # Round to nearest integer
+        FINAL_SCORE=$(echo "$FINAL_SCORE / 1" | bc)
+        
+        echo "score=$FINAL_SCORE" >> $GITHUB_OUTPUT
+        echo "📊 Calculated lint score: $FINAL_SCORE/100"
+
+    # Determine final result
+    - name: Determine final result
+      id: final_result
+      if: steps.get_files.outputs.skip == 'false'
+      shell: bash
+      run: |
+        TOTAL_ISSUES=${{ steps.consolidate.outputs.total_issues }}
+        SCORE=${{ steps.calculate_score.outputs.score }}
+        
+        if [[ $TOTAL_ISSUES -eq 0 ]]; then
+          echo "result=pass" >> $GITHUB_OUTPUT
+          echo "✅ All linting checks passed!"
+        elif [[ $SCORE -ge 70 ]] && [[ "${{ inputs.fail-on-warnings }}" == "false" ]]; then
+          echo "result=warning" >> $GITHUB_OUTPUT
+          echo "⚠️ Linting completed with warnings (score: $SCORE)"
+        else
+          echo "result=fail" >> $GITHUB_OUTPUT
+          echo "❌ Linting failed (score: $SCORE, issues: $TOTAL_ISSUES)"
+        fi
+
+    # Handle skipped case
+    - name: Handle skipped linting
+      id: skipped
+      if: steps.get_files.outputs.skip == 'true'
+      shell: bash
+      run: |
+        echo "result=pass" >> $GITHUB_OUTPUT
+        echo "ℹ️ No Python files to lint - skipping"
+        
+        # Create empty log files
+        echo "No Python files changed - linting skipped" > ./enhanced_lint_results.log
+        echo "No issues found (skipped)" > ./enhanced_lint_stats.log
+        echo "{\"skipped\": true}" > ./waiver_log.json
+
+    # Final status output
+    - name: Output final status
+      shell: bash
+      run: |
+        RESULT="${{ steps.final_result.outputs.result || steps.skipped.outputs.result }}"
+        
+        echo "🎯 Final linting result: $RESULT"
+        
+        if [[ "$RESULT" == "fail" ]]; then
+          exit 1
+        fi

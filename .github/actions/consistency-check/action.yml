@@ -1,0 +1,286 @@
+name: "Code Consistency Check"
+description: "Runs the modular consistency checker with configurable rules and scoring"
+
+inputs:
+  run_all_rules:
+    description: 'Run all available consistency rules'
+    required: false
+    default: 'true'
+  specific_rules:
+    description: 'Comma-separated list of specific rules to run'
+    required: false
+    default: ''
+  auto_fix:
+    description: 'Attempt to auto-fix issues where possible'
+    required: false
+    default: 'false'
+  fail_on_violations:
+    description: 'Fail the action if violations are found'
+    required: false
+    default: 'false'
+  report_format:
+    description: 'Output report format (json/html/text)'
+    required: false
+    default: 'json'
+
+outputs:
+  consistency_score:
+    description: 'Overall consistency score (0-100)'
+    value: ${{ steps.calculate-score.outputs.score }}
+  violations_found:
+    description: 'Total number of violations found'
+    value: ${{ steps.run-checker.outputs.violations }}
+  rules_passed:
+    description: 'Number of rules that passed'
+    value: ${{ steps.run-checker.outputs.rules_passed }}
+  rules_total:
+    description: 'Total number of rules executed'
+    value: ${{ steps.run-checker.outputs.rules_total }}
+  result:
+    description: 'Overall result (pass/fail)'
+    value: ${{ steps.determine-result.outputs.result }}
+  report_path:
+    description: 'Path to detailed consistency report'
+    value: './consistency-report.${{ inputs.report_format }}'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Python Environment
+      shell: bash
+      run: |
+        echo "🐍 Setting up Python environment for consistency checking..."
+        
+        # Install required Python packages
+        pip install pyyaml colorama || true
+        
+        # Create output directory
+        mkdir -p consistency-reports
+
+    - name: Run Consistency Checker
+      id: run-checker
+      shell: bash
+      run: |
+        echo "🔍 Running code consistency checker..."
+        
+        # Check if consistency checker exists
+        if [ ! -f "devops/consistency_checker/checker.py" ]; then
+          echo "❌ Consistency checker not found at devops/consistency_checker/checker.py"
+          echo "violations=0" >> $GITHUB_OUTPUT
+          echo "rules_passed=0" >> $GITHUB_OUTPUT
+          echo "rules_total=0" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+        
+        # Prepare arguments
+        CHECKER_ARGS=""
+        
+        if [ "${{ inputs.auto_fix }}" = "true" ]; then
+          CHECKER_ARGS="$CHECKER_ARGS --fix"
+        fi
+        
+        if [ "${{ inputs.run_all_rules }}" = "true" ]; then
+          CHECKER_ARGS="$CHECKER_ARGS --all-rules"
+        elif [ -n "${{ inputs.specific_rules }}" ]; then
+          # Convert comma-separated rules to individual --rule arguments
+          IFS=',' read -ra RULES <<< "${{ inputs.specific_rules }}"
+          for rule in "${RULES[@]}"; do
+            CHECKER_ARGS="$CHECKER_ARGS --rule $(echo $rule | xargs)"
+          done
+        fi
+        
+        # Add report format
+        CHECKER_ARGS="$CHECKER_ARGS --report-format ${{ inputs.report_format }}"
+        CHECKER_ARGS="$CHECKER_ARGS --output-file consistency-report.${{ inputs.report_format }}"
+        
+        echo "Running: python devops/consistency_checker/checker.py $CHECKER_ARGS"
+        
+        # Run the consistency checker
+        if python devops/consistency_checker/checker.py $CHECKER_ARGS > consistency-output.log 2>&1; then
+          CHECKER_EXIT_CODE=0
+        else
+          CHECKER_EXIT_CODE=$?
+        fi
+        
+        # Parse output for metrics
+        if [ -f "consistency-output.log" ]; then
+          cat consistency-output.log
+          
+          # Extract metrics from output
+          VIOLATIONS=$(grep -o "Found [0-9]* violations" consistency-output.log | grep -o "[0-9]*" | head -1 || echo "0")
+          RULES_TOTAL=$(grep -o "Checking [0-9]* rules" consistency-output.log | grep -o "[0-9]*" | head -1 || echo "1")
+          
+          # Calculate rules passed
+          if [ "$VIOLATIONS" -eq 0 ]; then
+            RULES_PASSED=$RULES_TOTAL
+          else
+            # Estimate based on violations (this could be more sophisticated)
+            RULES_PASSED=$((RULES_TOTAL - (VIOLATIONS / 2)))
+            if [ $RULES_PASSED -lt 0 ]; then
+              RULES_PASSED=0
+            fi
+          fi
+        else
+          echo "⚠️ No output log found, using defaults"
+          VIOLATIONS=0
+          RULES_TOTAL=1
+          RULES_PASSED=1
+        fi
+        
+        echo "violations=$VIOLATIONS" >> $GITHUB_OUTPUT
+        echo "rules_passed=$RULES_PASSED" >> $GITHUB_OUTPUT
+        echo "rules_total=$RULES_TOTAL" >> $GITHUB_OUTPUT
+        echo "checker_exit_code=$CHECKER_EXIT_CODE" >> $GITHUB_OUTPUT
+        
+        echo "📊 Consistency Check Results:"
+        echo "  Violations Found: $VIOLATIONS"
+        echo "  Rules Passed: $RULES_PASSED/$RULES_TOTAL"
+        echo "  Checker Exit Code: $CHECKER_EXIT_CODE"
+
+    - name: Calculate Consistency Score
+      id: calculate-score
+      shell: bash
+      run: |
+        echo "🧮 Calculating consistency score..."
+        
+        VIOLATIONS=${{ steps.run-checker.outputs.violations }}
+        RULES_PASSED=${{ steps.run-checker.outputs.rules_passed }}
+        RULES_TOTAL=${{ steps.run-checker.outputs.rules_total }}
+        
+        # Scoring algorithm
+        if [ "$RULES_TOTAL" -eq 0 ]; then
+          SCORE=100
+        else
+          # Base score from rules passed ratio
+          BASE_SCORE=$(echo "scale=2; ($RULES_PASSED * 100) / $RULES_TOTAL" | bc)
+          
+          # Penalty for violations (max 50 point penalty)
+          VIOLATION_PENALTY=$(echo "scale=2; ($VIOLATIONS * 2)" | bc)
+          if [ $(echo "$VIOLATION_PENALTY > 50" | bc) -eq 1 ]; then
+            VIOLATION_PENALTY=50
+          fi
+          
+          # Calculate final score
+          SCORE=$(echo "scale=2; $BASE_SCORE - $VIOLATION_PENALTY" | bc)
+          
+          # Ensure score is not negative
+          if [ $(echo "$SCORE < 0" | bc) -eq 1 ]; then
+            SCORE=0
+          fi
+        fi
+        
+        # Round to integer
+        SCORE=$(printf "%.0f" "$SCORE")
+        
+        echo "score=$SCORE" >> $GITHUB_OUTPUT
+        echo "📊 Consistency Score: $SCORE/100"
+
+    - name: Determine Result
+      id: determine-result
+      shell: bash
+      run: |
+        echo "🎯 Determining overall result..."
+        
+        VIOLATIONS=${{ steps.run-checker.outputs.violations }}
+        CHECKER_EXIT_CODE=${{ steps.run-checker.outputs.checker_exit_code }}
+        FAIL_ON_VIOLATIONS="${{ inputs.fail_on_violations }}"
+        
+        if [ "$CHECKER_EXIT_CODE" -ne 0 ]; then
+          echo "result=fail" >> $GITHUB_OUTPUT
+          echo "❌ FAIL: Consistency checker failed to execute properly"
+        elif [ "$VIOLATIONS" -gt 0 ] && [ "$FAIL_ON_VIOLATIONS" = "true" ]; then
+          echo "result=fail" >> $GITHUB_OUTPUT
+          echo "❌ FAIL: $VIOLATIONS violations found (fail_on_violations=true)"
+        else
+          echo "result=pass" >> $GITHUB_OUTPUT
+          if [ "$VIOLATIONS" -gt 0 ]; then
+            echo "✅ PASS: $VIOLATIONS violations found but allowed"
+          else
+            echo "✅ PASS: No consistency violations found"
+          fi
+        fi
+
+    - name: Generate Enhanced Report
+      shell: bash
+      run: |
+        echo "📄 Generating enhanced consistency report..."
+        
+        # Create comprehensive JSON report
+        cat > consistency-reports/detailed-report.json << EOF
+{
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "configuration": {
+    "run_all_rules": ${{ inputs.run_all_rules }},
+    "specific_rules": "${{ inputs.specific_rules }}",
+    "auto_fix": ${{ inputs.auto_fix }},
+    "fail_on_violations": ${{ inputs.fail_on_violations }}
+  },
+  "results": {
+    "overall_score": ${{ steps.calculate-score.outputs.score }},
+    "overall_result": "${{ steps.determine-result.outputs.result }}",
+    "violations_found": ${{ steps.run-checker.outputs.violations }},
+    "rules_passed": ${{ steps.run-checker.outputs.rules_passed }},
+    "rules_total": ${{ steps.run-checker.outputs.rules_total }},
+    "checker_exit_code": ${{ steps.run-checker.outputs.checker_exit_code }}
+  }
+}
+EOF
+
+        # Create markdown summary
+        cat > consistency-reports/summary.md << EOF
+# Code Consistency Check Report
+
+## Overall Result: ${{ steps.determine-result.outputs.result == 'pass' && '✅ PASSED' || '❌ FAILED' }}
+
+**Score**: ${{ steps.calculate-score.outputs.score }}/100  
+**Violations Found**: ${{ steps.run-checker.outputs.violations }}  
+**Rules Passed**: ${{ steps.run-checker.outputs.rules_passed }}/${{ steps.run-checker.outputs.rules_total }}
+
+## Configuration
+- **Run All Rules**: ${{ inputs.run_all_rules }}
+- **Specific Rules**: ${{ inputs.specific_rules || 'None' }}
+- **Auto Fix**: ${{ inputs.auto_fix }}
+- **Fail on Violations**: ${{ inputs.fail_on_violations }}
+
+## Details
+$(if [ -f "consistency-output.log" ]; then
+  echo '```'
+  cat consistency-output.log
+  echo '```'
+else
+  echo "No detailed output available"
+fi)
+
+---
+**Generated**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+EOF
+
+        echo "✅ Enhanced consistency report generated"
+
+    - name: Copy Main Report
+      shell: bash
+      run: |
+        # Copy the main report to the expected output location
+        if [ -f "consistency-report.${{ inputs.report_format }}" ]; then
+          cp "consistency-report.${{ inputs.report_format }}" "consistency-reports/"
+          echo "✅ Main report copied to consistency-reports/"
+        else
+          echo "⚠️ Main report not found, creating placeholder"
+          echo '{"status": "completed", "score": ${{ steps.calculate-score.outputs.score }}}' > "consistency-report.${{ inputs.report_format }}"
+        fi
+
+    - name: Consistency Check Summary
+      shell: bash
+      run: |
+        echo "📋 Code Consistency Summary"
+        echo "============================"
+        echo "Overall Score: ${{ steps.calculate-score.outputs.score }}/100"
+        echo "Result: ${{ steps.determine-result.outputs.result }}"
+        echo "Violations: ${{ steps.run-checker.outputs.violations }}"
+        echo "Rules Passed: ${{ steps.run-checker.outputs.rules_passed }}/${{ steps.run-checker.outputs.rules_total }}"
+        echo "Auto-fix Enabled: ${{ inputs.auto_fix }}"
+        echo "Report Format: ${{ inputs.report_format }}"
+        
+        if [ -f "consistency-report.${{ inputs.report_format }}" ]; then
+          echo "Report Path: consistency-report.${{ inputs.report_format }}"
+        fi

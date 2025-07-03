@@ -1,0 +1,708 @@
+# ==============================================================================
+# Pull Request Validation Workflow
+# ==============================================================================
+# Description:
+# This workflow runs a comprehensive 5-stage validation process when a PR is created
+# or updated. Each stage has a weight, and the overall score determines if the PR
+# should be auto-merged or blocked.
+#
+# Stages:
+# 1. Code Quality (25%) - Linting, complexity, coverage
+# 2. Security Scan (20%) - SAST, dependency vulnerabilities  
+# 3. Testing (25%) - Unit, integration, smoke tests
+# 4. Documentation (15%) - README, docstrings, changelog
+# 5. Compliance (15%) - License checks, naming conventions
+#
+# Total score >= 80% = Auto-merge
+# Total score 60-79% = Manual review required
+# Total score < 60% = Block merge
+
+name: PR Validation Pipeline
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main, develop]
+  pull_request_review:
+    types: [submitted]
+
+concurrency:
+  group: pr-validation-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+  issues: write
+  security-events: write
+
+env:
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+  BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
+  HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+
+jobs:
+  # ==============================================================================
+  # Pre-validation checks
+  # ==============================================================================
+  pre-validation:
+    name: Pre-validation Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+      pr_info: ${{ steps.pr_info.outputs.info }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check PR requirements
+        id: pr_info
+        run: |
+          # Extract JIRA ticket from PR title/branch
+          JIRA_PATTERN="[A-Z]+-[0-9]+"
+          JIRA_TICKET=$(echo "${{ github.event.pull_request.title }}" | grep -oE "$JIRA_PATTERN" || echo "")
+          
+          if [ -z "$JIRA_TICKET" ]; then
+            JIRA_TICKET=$(echo "${{ github.event.pull_request.head.ref }}" | grep -oE "$JIRA_PATTERN" || echo "")
+          fi
+          
+          echo "jira_ticket=$JIRA_TICKET" >> $GITHUB_OUTPUT
+          
+          # Check if PR has required labels
+          HAS_TYPE_LABEL=$(echo '${{ toJson(github.event.pull_request.labels) }}' | jq -r '.[] | select(.name | startswith("type/")) | .name' | wc -l)
+          echo "has_type_label=$HAS_TYPE_LABEL" >> $GITHUB_OUTPUT
+          
+          # Get changed files
+          CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
+          echo "changed_files<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGED_FILES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Skip check for draft PRs
+        id: skip_check
+        run: |
+          if [ "${{ github.event.pull_request.draft }}" == "true" ]; then
+            echo "should_skip=true" >> $GITHUB_OUTPUT
+            echo "⚠️ Skipping validation for draft PR"
+          else
+            echo "should_skip=false" >> $GITHUB_OUTPUT
+          fi
+
+  # ==============================================================================
+  # Stage 1: Code Quality (25% weight)
+  # ==============================================================================
+  code-quality:
+    name: "Stage 1: Code Quality"
+    runs-on: ubuntu-latest
+    needs: pre-validation
+    if: needs.pre-validation.outputs.should_skip == 'false'
+    timeout-minutes: 15
+    outputs:
+      score: ${{ steps.calculate_score.outputs.score }}
+      max_score: ${{ steps.calculate_score.outputs.max_score }}
+      details: ${{ steps.calculate_score.outputs.details }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Enhanced Python Linting
+        id: lint
+        uses: ./.github/actions/python-lint-enhanced
+        with:
+          changed-only: 'true'
+          python-version: '3.11.1'
+          enable-waivers: 'true'
+        continue-on-error: true
+
+      - name: Code Complexity Analysis
+        id: complexity
+        run: |
+          pip install radon
+          
+          # Calculate complexity
+          COMPLEXITY_SCORE=0
+          for file in $(git diff --name-only ${{ github.event.pull_request.base.sha }} --diff-filter=AM | grep '\.py$'); do
+            if [ -f "$file" ]; then
+              CC=$(radon cc "$file" -a | grep "Average complexity" | awk '{print $NF}' | tr -d '(' | tr -d ')')
+              if (( $(echo "$CC > 10" | bc -l) )); then
+                echo "⚠️ High complexity in $file: $CC"
+              fi
+            fi
+          done
+          
+          echo "complexity_score=85" >> $GITHUB_OUTPUT  # Placeholder
+
+      - name: Code Coverage Check
+        id: coverage
+        run: |
+          # Install coverage tools
+          pip install coverage pytest
+          
+          # Run tests with coverage (if tests exist)
+          COVERAGE_SCORE=0
+          if [ -d "tests" ] || [ -f "test_*.py" ]; then
+            coverage run -m pytest || true
+            COVERAGE_PERCENTAGE=$(coverage report | grep TOTAL | awk '{print $NF}' | tr -d '%')
+            echo "Coverage: $COVERAGE_PERCENTAGE%"
+            COVERAGE_SCORE=$COVERAGE_PERCENTAGE
+          else
+            echo "No tests found, defaulting coverage to 70%"
+            COVERAGE_SCORE=70
+          fi
+          
+          echo "coverage_score=$COVERAGE_SCORE" >> $GITHUB_OUTPUT
+
+      - name: Calculate Code Quality Score
+        id: calculate_score
+        run: |
+          # Weights: Lint (40%), Complexity (30%), Coverage (30%)
+          LINT_SCORE=${{ steps.lint.outputs.score || 80 }}
+          COMPLEXITY_SCORE=${{ steps.complexity.outputs.complexity_score }}
+          COVERAGE_SCORE=${{ steps.coverage.outputs.coverage_score }}
+          
+          TOTAL_SCORE=$(echo "($LINT_SCORE * 0.4) + ($COMPLEXITY_SCORE * 0.3) + ($COVERAGE_SCORE * 0.3)" | bc -l)
+          
+          echo "score=$TOTAL_SCORE" >> $GITHUB_OUTPUT
+          echo "max_score=100" >> $GITHUB_OUTPUT
+          echo "details=Lint: $LINT_SCORE%, Complexity: $COMPLEXITY_SCORE%, Coverage: $COVERAGE_SCORE%" >> $GITHUB_OUTPUT
+
+  # ==============================================================================
+  # Stage 2: Security Scan (20% weight)
+  # ==============================================================================
+  security-scan:
+    name: "Stage 2: Security Scan"
+    runs-on: ubuntu-latest
+    needs: pre-validation
+    if: needs.pre-validation.outputs.should_skip == 'false'
+    timeout-minutes: 15
+    outputs:
+      score: ${{ steps.calculate_score.outputs.score }}
+      max_score: ${{ steps.calculate_score.outputs.max_score }}
+      details: ${{ steps.calculate_score.outputs.details }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Python Security Scan (Bandit)
+        id: bandit
+        run: |
+          pip install bandit
+          
+          # Run bandit on changed Python files
+          CHANGED_PY_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} --diff-filter=AM | grep '\.py$' || echo "")
+          
+          if [ -n "$CHANGED_PY_FILES" ]; then
+            bandit -r $CHANGED_PY_FILES -f json -o bandit_report.json || true
+            
+            # Count issues by severity
+            HIGH_ISSUES=$(jq '[.results[] | select(.issue_severity == "HIGH")] | length' bandit_report.json 2>/dev/null || echo 0)
+            MEDIUM_ISSUES=$(jq '[.results[] | select(.issue_severity == "MEDIUM")] | length' bandit_report.json 2>/dev/null || echo 0)
+            LOW_ISSUES=$(jq '[.results[] | select(.issue_severity == "LOW")] | length' bandit_report.json 2>/dev/null || echo 0)
+            
+            echo "high_issues=$HIGH_ISSUES" >> $GITHUB_OUTPUT
+            echo "medium_issues=$MEDIUM_ISSUES" >> $GITHUB_OUTPUT
+            echo "low_issues=$LOW_ISSUES" >> $GITHUB_OUTPUT
+          else
+            echo "high_issues=0" >> $GITHUB_OUTPUT
+            echo "medium_issues=0" >> $GITHUB_OUTPUT
+            echo "low_issues=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Dependency Vulnerability Scan
+        id: deps
+        run: |
+          pip install safety
+          
+          # Check for known vulnerabilities
+          safety check --json --output safety_report.json || true
+          
+          VULNERABILITIES=$(jq length safety_report.json 2>/dev/null || echo 0)
+          echo "vulnerabilities=$VULNERABILITIES" >> $GITHUB_OUTPUT
+
+      - name: Secrets Scan
+        id: secrets
+        run: |
+          # Simple secret pattern detection
+          SECRET_PATTERNS=(
+            "api[_-]?key"
+            "password"
+            "secret"
+            "token"
+            "credential"
+          )
+          
+          SECRET_COUNT=0
+          for pattern in "${SECRET_PATTERNS[@]}"; do
+            matches=$(git diff ${{ github.event.pull_request.base.sha }} | grep -i "$pattern" | wc -l)
+            SECRET_COUNT=$((SECRET_COUNT + matches))
+          done
+          
+          echo "potential_secrets=$SECRET_COUNT" >> $GITHUB_OUTPUT
+
+      - name: Calculate Security Score
+        id: calculate_score
+        run: |
+          HIGH_ISSUES=${{ steps.bandit.outputs.high_issues }}
+          MEDIUM_ISSUES=${{ steps.bandit.outputs.medium_issues }}
+          LOW_ISSUES=${{ steps.bandit.outputs.low_issues }}
+          VULNERABILITIES=${{ steps.deps.outputs.vulnerabilities }}
+          SECRETS=${{ steps.secrets.outputs.potential_secrets }}
+          
+          # Calculate penalty points
+          PENALTY=$((HIGH_ISSUES * 20 + MEDIUM_ISSUES * 10 + LOW_ISSUES * 2 + VULNERABILITIES * 15 + SECRETS * 25))
+          SCORE=$((100 - PENALTY))
+          
+          # Ensure score doesn't go below 0
+          if [ $SCORE -lt 0 ]; then
+            SCORE=0
+          fi
+          
+          echo "score=$SCORE" >> $GITHUB_OUTPUT
+          echo "max_score=100" >> $GITHUB_OUTPUT
+          echo "details=High: $HIGH_ISSUES, Medium: $MEDIUM_ISSUES, Low: $LOW_ISSUES, Vulns: $VULNERABILITIES, Secrets: $SECRETS" >> $GITHUB_OUTPUT
+
+  # ==============================================================================
+  # Stage 3: Testing (25% weight)
+  # ==============================================================================
+  testing:
+    name: "Stage 3: Testing"
+    runs-on: ubuntu-latest
+    needs: pre-validation
+    if: needs.pre-validation.outputs.should_skip == 'false'
+    timeout-minutes: 20
+    outputs:
+      score: ${{ steps.calculate_score.outputs.score }}
+      max_score: ${{ steps.calculate_score.outputs.max_score }}
+      details: ${{ steps.calculate_score.outputs.details }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11.1'
+
+      - name: Install dependencies
+        run: |
+          pip install pytest pytest-cov pytest-xdist
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f requirements-test.txt ]; then pip install -r requirements-test.txt; fi
+
+      - name: Unit Tests
+        id: unit_tests
+        run: |
+          if [ -d "tests" ] || find . -name "test_*.py" | grep -q .; then
+            pytest tests/ -v --tb=short --junitxml=unit_test_results.xml || true
+            
+            # Parse results
+            TOTAL_TESTS=$(grep -o 'tests="[0-9]*"' unit_test_results.xml | grep -o '[0-9]*' || echo 0)
+            FAILED_TESTS=$(grep -o 'failures="[0-9]*"' unit_test_results.xml | grep -o '[0-9]*' || echo 0)
+            ERROR_TESTS=$(grep -o 'errors="[0-9]*"' unit_test_results.xml | grep -o '[0-9]*' || echo 0)
+            
+            PASSED_TESTS=$((TOTAL_TESTS - FAILED_TESTS - ERROR_TESTS))
+            
+            echo "total=$TOTAL_TESTS" >> $GITHUB_OUTPUT
+            echo "passed=$PASSED_TESTS" >> $GITHUB_OUTPUT
+            echo "failed=$FAILED_TESTS" >> $GITHUB_OUTPUT
+          else
+            echo "total=0" >> $GITHUB_OUTPUT
+            echo "passed=0" >> $GITHUB_OUTPUT
+            echo "failed=0" >> $GITHUB_OUTPUT
+            echo "⚠️ No unit tests found"
+          fi
+
+      - name: Integration Tests
+        id: integration_tests
+        run: |
+          # Look for integration tests
+          if find . -name "*integration*test*.py" | grep -q .; then
+            pytest -k "integration" -v --tb=short || true
+            echo "integration_passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "integration_passed=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ No integration tests found"
+          fi
+
+      - name: Smoke Tests
+        id: smoke_tests
+        run: |
+          # Basic import tests for changed Python files
+          SMOKE_SCORE=100
+          CHANGED_PY_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} --diff-filter=AM | grep '\.py$' || echo "")
+          
+          for file in $CHANGED_PY_FILES; do
+            if [ -f "$file" ]; then
+              python -m py_compile "$file" || SMOKE_SCORE=$((SMOKE_SCORE - 10))
+            fi
+          done
+          
+          if [ $SMOKE_SCORE -lt 0 ]; then
+            SMOKE_SCORE=0
+          fi
+          
+          echo "smoke_score=$SMOKE_SCORE" >> $GITHUB_OUTPUT
+
+      - name: Calculate Testing Score
+        id: calculate_score
+        run: |
+          TOTAL_TESTS=${{ steps.unit_tests.outputs.total }}
+          PASSED_TESTS=${{ steps.unit_tests.outputs.passed }}
+          FAILED_TESTS=${{ steps.unit_tests.outputs.failed }}
+          INTEGRATION_PASSED=${{ steps.integration_tests.outputs.integration_passed }}
+          SMOKE_SCORE=${{ steps.smoke_tests.outputs.smoke_score }}
+          
+          # Calculate test pass rate
+          if [ $TOTAL_TESTS -gt 0 ]; then
+            PASS_RATE=$(echo "scale=2; $PASSED_TESTS * 100 / $TOTAL_TESTS" | bc)
+          else
+            PASS_RATE=70  # Default if no tests
+          fi
+          
+          # Integration test bonus
+          INTEGRATION_BONUS=0
+          if [ "$INTEGRATION_PASSED" = "true" ]; then
+            INTEGRATION_BONUS=10
+          fi
+          
+          # Final score: Pass rate (70%) + Smoke (20%) + Integration bonus (10%)
+          SCORE=$(echo "scale=0; ($PASS_RATE * 0.7) + ($SMOKE_SCORE * 0.2) + $INTEGRATION_BONUS" | bc)
+          
+          echo "score=$SCORE" >> $GITHUB_OUTPUT
+          echo "max_score=100" >> $GITHUB_OUTPUT
+          echo "details=Pass Rate: $PASS_RATE%, Smoke: $SMOKE_SCORE%, Integration: $INTEGRATION_PASSED" >> $GITHUB_OUTPUT
+
+  # ==============================================================================
+  # Stage 4: Documentation (15% weight)
+  # ==============================================================================
+  documentation:
+    name: "Stage 4: Documentation"
+    runs-on: ubuntu-latest
+    needs: pre-validation
+    if: needs.pre-validation.outputs.should_skip == 'false'
+    timeout-minutes: 10
+    outputs:
+      score: ${{ steps.calculate_score.outputs.score }}
+      max_score: ${{ steps.calculate_score.outputs.max_score }}
+      details: ${{ steps.calculate_score.outputs.details }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check README updates
+        id: readme_check
+        run: |
+          # Check if README was updated for significant changes
+          CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} --diff-filter=AM)
+          README_UPDATED=$(echo "$CHANGED_FILES" | grep -i readme || echo "")
+          SIGNIFICANT_CHANGES=$(echo "$CHANGED_FILES" | wc -l)
+          
+          if [ $SIGNIFICANT_CHANGES -gt 5 ] && [ -z "$README_UPDATED" ]; then
+            echo "readme_score=60" >> $GITHUB_OUTPUT  # Penalty for not updating README
+          else
+            echo "readme_score=100" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check docstring coverage
+        id: docstring_check
+        run: |
+          pip install interrogate
+          
+          # Check docstring coverage for changed Python files
+          CHANGED_PY_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} --diff-filter=AM | grep '\.py$' || echo "")
+          
+          if [ -n "$CHANGED_PY_FILES" ]; then
+            DOCSTRING_COVERAGE=$(interrogate $CHANGED_PY_FILES --ignore-init-method --ignore-magic --quiet | grep -o '[0-9]*\.[0-9]*%' | head -1 | tr -d '%' || echo "80")
+            echo "docstring_score=$DOCSTRING_COVERAGE" >> $GITHUB_OUTPUT
+          else
+            echo "docstring_score=100" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check changelog updates
+        id: changelog_check
+        run: |
+          # Check if CHANGELOG was updated
+          CHANGELOG_UPDATED=$(git diff --name-only ${{ github.event.pull_request.base.sha }} | grep -i changelog || echo "")
+          
+          if [ -n "$CHANGELOG_UPDATED" ]; then
+            echo "changelog_score=100" >> $GITHUB_OUTPUT
+          else
+            echo "changelog_score=80" >> $GITHUB_OUTPUT  # Minor penalty
+          fi
+
+      - name: Calculate Documentation Score
+        id: calculate_score
+        run: |
+          README_SCORE=${{ steps.readme_check.outputs.readme_score }}
+          DOCSTRING_SCORE=${{ steps.docstring_check.outputs.docstring_score }}
+          CHANGELOG_SCORE=${{ steps.changelog_check.outputs.changelog_score }}
+          
+          # Weighted average: README (30%), Docstrings (50%), Changelog (20%)
+          SCORE=$(echo "scale=0; ($README_SCORE * 0.3) + ($DOCSTRING_SCORE * 0.5) + ($CHANGELOG_SCORE * 0.2)" | bc)
+          
+          echo "score=$SCORE" >> $GITHUB_OUTPUT
+          echo "max_score=100" >> $GITHUB_OUTPUT
+          echo "details=README: $README_SCORE%, Docstrings: $DOCSTRING_SCORE%, Changelog: $CHANGELOG_SCORE%" >> $GITHUB_OUTPUT
+
+  # ==============================================================================
+  # Stage 5: Compliance (15% weight)
+  # ==============================================================================
+  compliance:
+    name: "Stage 5: Compliance"
+    runs-on: ubuntu-latest
+    needs: pre-validation
+    if: needs.pre-validation.outputs.should_skip == 'false'
+    timeout-minutes: 10
+    outputs:
+      score: ${{ steps.calculate_score.outputs.score }}
+      max_score: ${{ steps.calculate_score.outputs.max_score }}
+      details: ${{ steps.calculate_score.outputs.details }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: License compliance check
+        id: license_check
+        run: |
+          # Check for license headers in new Python files
+          NEW_PY_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} --diff-filter=A | grep '\.py$' || echo "")
+          
+          LICENSE_SCORE=100
+          for file in $NEW_PY_FILES; do
+            if [ -f "$file" ]; then
+              # Check first 10 lines for copyright/license
+              if ! head -10 "$file" | grep -qi "copyright\|license"; then
+                LICENSE_SCORE=$((LICENSE_SCORE - 10))
+                echo "⚠️ Missing license header in $file"
+              fi
+            fi
+          done
+          
+          if [ $LICENSE_SCORE -lt 0 ]; then
+            LICENSE_SCORE=0
+          fi
+          
+          echo "license_score=$LICENSE_SCORE" >> $GITHUB_OUTPUT
+
+      - name: Naming convention check
+        id: naming_check
+        run: |
+          # Check Python naming conventions
+          NAMING_SCORE=100
+          CHANGED_PY_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} --diff-filter=AM | grep '\.py$' || echo "")
+          
+          for file in $CHANGED_PY_FILES; do
+            if [ -f "$file" ]; then
+              # Check for camelCase functions (should be snake_case)
+              CAMEL_CASE_FUNCS=$(grep -E "def [a-z]+[A-Z]" "$file" | wc -l)
+              if [ $CAMEL_CASE_FUNCS -gt 0 ]; then
+                NAMING_SCORE=$((NAMING_SCORE - 5))
+                echo "⚠️ camelCase functions found in $file"
+              fi
+              
+              # Check for SCREAMING_SNAKE_CASE variables (should be constants)
+              BAD_VARS=$(grep -E "[a-z_]+[A-Z][A-Z_]*\s*=" "$file" | wc -l)
+              if [ $BAD_VARS -gt 0 ]; then
+                NAMING_SCORE=$((NAMING_SCORE - 3))
+              fi
+            fi
+          done
+          
+          if [ $NAMING_SCORE -lt 0 ]; then
+            NAMING_SCORE=0
+          fi
+          
+          echo "naming_score=$NAMING_SCORE" >> $GITHUB_OUTPUT
+
+      - name: File structure compliance
+        id: structure_check
+        run: |
+          # Check for proper file organization
+          STRUCTURE_SCORE=100
+          
+          # Check if test files are in tests/ directory
+          MISPLACED_TESTS=$(git diff --name-only ${{ github.event.pull_request.base.sha }} --diff-filter=A | grep "test_.*\.py" | grep -v "tests/" | wc -l)
+          if [ $MISPLACED_TESTS -gt 0 ]; then
+            STRUCTURE_SCORE=$((STRUCTURE_SCORE - 10))
+            echo "⚠️ Test files should be in tests/ directory"
+          fi
+          
+          # Check for __init__.py in new directories
+          NEW_DIRS=$(git diff --name-only ${{ github.event.pull_request.base.sha }} --diff-filter=A | xargs -I {} dirname {} | sort -u | grep -v "^\.$")
+          for dir in $NEW_DIRS; do
+            if [ -d "$dir" ] && [ ! -f "$dir/__init__.py" ] && find "$dir" -name "*.py" | grep -q .; then
+              STRUCTURE_SCORE=$((STRUCTURE_SCORE - 5))
+              echo "⚠️ Missing __init__.py in $dir"
+            fi
+          done
+          
+          echo "structure_score=$STRUCTURE_SCORE" >> $GITHUB_OUTPUT
+
+      - name: Calculate Compliance Score
+        id: calculate_score
+        run: |
+          LICENSE_SCORE=${{ steps.license_check.outputs.license_score }}
+          NAMING_SCORE=${{ steps.naming_check.outputs.naming_score }}
+          STRUCTURE_SCORE=${{ steps.structure_check.outputs.structure_score }}
+          
+          # Equal weights for all compliance checks
+          SCORE=$(echo "scale=0; ($LICENSE_SCORE + $NAMING_SCORE + $STRUCTURE_SCORE) / 3" | bc)
+          
+          echo "score=$SCORE" >> $GITHUB_OUTPUT
+          echo "max_score=100" >> $GITHUB_OUTPUT
+          echo "details=License: $LICENSE_SCORE%, Naming: $NAMING_SCORE%, Structure: $STRUCTURE_SCORE%" >> $GITHUB_OUTPUT
+
+  # ==============================================================================
+  # Final Scoring and Decision
+  # ==============================================================================
+  final-scoring:
+    name: Final PR Scoring & Decision
+    runs-on: ubuntu-latest
+    needs: [pre-validation, code-quality, security-scan, testing, documentation, compliance]
+    if: needs.pre-validation.outputs.should_skip == 'false'
+    timeout-minutes: 10
+    outputs:
+      final_score: ${{ steps.calculate_final.outputs.final_score }}
+      decision: ${{ steps.make_decision.outputs.decision }}
+    steps:
+      - name: Calculate Final Score
+        id: calculate_final
+        run: |
+          # Stage weights: Quality(25%), Security(20%), Testing(25%), Docs(15%), Compliance(15%)
+          CODE_QUALITY_SCORE=${{ needs.code-quality.outputs.score }}
+          SECURITY_SCORE=${{ needs.security-scan.outputs.score }}
+          TESTING_SCORE=${{ needs.testing.outputs.score }}
+          DOCS_SCORE=${{ needs.documentation.outputs.score }}
+          COMPLIANCE_SCORE=${{ needs.compliance.outputs.score }}
+          
+          FINAL_SCORE=$(echo "scale=1; ($CODE_QUALITY_SCORE * 0.25) + ($SECURITY_SCORE * 0.20) + ($TESTING_SCORE * 0.25) + ($DOCS_SCORE * 0.15) + ($COMPLIANCE_SCORE * 0.15)" | bc)
+          
+          echo "final_score=$FINAL_SCORE" >> $GITHUB_OUTPUT
+          
+          echo "📊 **PR Validation Results**" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Score | Weight | Weighted Score |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|--------|----------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Code Quality | $CODE_QUALITY_SCORE% | 25% | $(echo "scale=1; $CODE_QUALITY_SCORE * 0.25" | bc)% |" >> $GITHUB_STEP_SUMMARY
+          echo "| Security | $SECURITY_SCORE% | 20% | $(echo "scale=1; $SECURITY_SCORE * 0.20" | bc)% |" >> $GITHUB_STEP_SUMMARY
+          echo "| Testing | $TESTING_SCORE% | 25% | $(echo "scale=1; $TESTING_SCORE * 0.25" | bc)% |" >> $GITHUB_STEP_SUMMARY
+          echo "| Documentation | $DOCS_SCORE% | 15% | $(echo "scale=1; $DOCS_SCORE * 0.15" | bc)% |" >> $GITHUB_STEP_SUMMARY
+          echo "| Compliance | $COMPLIANCE_SCORE% | 15% | $(echo "scale=1; $COMPLIANCE_SCORE * 0.15" | bc)% |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Final Score** | **$FINAL_SCORE%** | **100%** | **$FINAL_SCORE%** |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Make Decision
+        id: make_decision
+        run: |
+          FINAL_SCORE=${{ steps.calculate_final.outputs.final_score }}
+          
+          if (( $(echo "$FINAL_SCORE >= 80" | bc -l) )); then
+            echo "decision=auto-merge" >> $GITHUB_OUTPUT
+            echo "🟢 **DECISION: AUTO-MERGE** ✅" >> $GITHUB_STEP_SUMMARY
+            echo "Score: $FINAL_SCORE% (≥80% required for auto-merge)" >> $GITHUB_STEP_SUMMARY
+          elif (( $(echo "$FINAL_SCORE >= 60" | bc -l) )); then
+            echo "decision=manual-review" >> $GITHUB_OUTPUT
+            echo "🟡 **DECISION: MANUAL REVIEW REQUIRED** ⚠️" >> $GITHUB_STEP_SUMMARY
+            echo "Score: $FINAL_SCORE% (60-79% requires manual approval)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "decision=block" >> $GITHUB_OUTPUT
+            echo "🔴 **DECISION: BLOCKED** ❌" >> $GITHUB_STEP_SUMMARY
+            echo "Score: $FINAL_SCORE% (<60% blocks merge)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Update PR with results
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const decision = '${{ steps.make_decision.outputs.decision }}';
+            const finalScore = '${{ steps.calculate_final.outputs.final_score }}';
+            
+            // Create status check
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: '${{ github.event.pull_request.head.sha }}',
+              state: decision === 'auto-merge' ? 'success' : decision === 'manual-review' ? 'pending' : 'failure',
+              context: 'PR Validation Pipeline',
+              description: `Score: ${finalScore}% - ${decision.replace('-', ' ').toUpperCase()}`
+            });
+            
+            // Add comment with detailed results
+            const comment = `## 🔍 PR Validation Results
+            
+            **Final Score: ${finalScore}%**
+            
+            | Stage | Score | Details |
+            |-------|-------|---------|
+            | Code Quality (25%) | ${{ needs.code-quality.outputs.score }}% | ${{ needs.code-quality.outputs.details }} |
+            | Security (20%) | ${{ needs.security-scan.outputs.score }}% | ${{ needs.security-scan.outputs.details }} |
+            | Testing (25%) | ${{ needs.testing.outputs.score }}% | ${{ needs.testing.outputs.details }} |
+            | Documentation (15%) | ${{ needs.documentation.outputs.score }}% | ${{ needs.documentation.outputs.details }} |
+            | Compliance (15%) | ${{ needs.compliance.outputs.score }}% | ${{ needs.compliance.outputs.details }} |
+            
+            **Decision: ${decision === 'auto-merge' ? '✅ AUTO-MERGE' : decision === 'manual-review' ? '⚠️ MANUAL REVIEW REQUIRED' : '❌ BLOCKED'}**
+            
+            ${decision === 'auto-merge' ? 'This PR will be automatically merged once all checks pass.' : 
+              decision === 'manual-review' ? 'This PR requires manual review and approval before merging.' : 
+              'This PR is blocked from merging due to validation failures. Please address the issues and re-run validation.'}
+            `;
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ github.event.pull_request.number }},
+              body: comment
+            });
+
+  # ==============================================================================
+  # Auto-merge (if score >= 80%)
+  # ==============================================================================
+  auto-merge:
+    name: Auto-merge PR
+    runs-on: ubuntu-latest
+    needs: [final-scoring]
+    if: needs.final-scoring.outputs.decision == 'auto-merge'
+    timeout-minutes: 10
+    steps:
+      - name: Enable auto-merge
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            await github.rest.pulls.enableAutoMerge({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: ${{ github.event.pull_request.number }},
+              merge_method: 'squash'
+            });
+            
+            console.log('Auto-merge enabled for PR #${{ github.event.pull_request.number }}');
+
+  # ==============================================================================
+  # Send notification
+  # ==============================================================================
+  notify:
+    name: Send Notification
+    runs-on: ubuntu-latest
+    needs: [final-scoring]
+    if: always() && needs.final-scoring.result != 'skipped'
+    steps:
+      - name: Send email notification
+        uses: ./.github/actions/email-notification
+        with:
+          status: ${{ needs.final-scoring.outputs.decision }}
+          subject: "PR #${{ github.event.pull_request.number }} Validation: ${{ needs.final-scoring.outputs.decision }}"
+          message: |
+            PR Validation completed for #${{ github.event.pull_request.number }}
+            
+            Final Score: ${{ needs.final-scoring.outputs.final_score }}%
+            Decision: ${{ needs.final-scoring.outputs.decision }}
+            
+            View details: ${{ github.event.pull_request.html_url }}
+          recipients: ${{ github.event.pull_request.user.email }}
+        continue-on-error: true

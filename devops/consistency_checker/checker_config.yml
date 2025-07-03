@@ -1,0 +1,124 @@
+# Consistency Checker Configuration
+
+# Global settings
+settings:
+  # Maximum number of issues to report per file before truncating
+  max_issues_per_file: 50
+  
+  # Enable parallel execution of rules
+  parallel_execution: true
+  
+  # Show detailed timing information
+  show_timing: false
+  
+  # Enable debug mode for troubleshooting
+  debug: false
+
+# File patterns to include in checks
+file_patterns:
+  - "**/*.py"
+  - "**/*.pyx"  # Cython files
+
+# Patterns to exclude from all checks
+exclude_patterns:
+  - "**/__pycache__/**"
+  - "**/.*/**"
+  - "**/venv/**"
+  - "**/env/**"
+  - "**/build/**"
+  - "**/dist/**"
+  - "**/.git/**"
+  - "**/node_modules/**"
+  - "**/*.pyc"
+  - "**/*.pyo"
+
+# Rule configuration
+rules:
+  # Enable/disable specific rules
+  enabled_rules: []  # Empty list means all rules are enabled
+  
+  disabled_rules:
+    # Example: disable specific rules
+    # - "naming_conventions"
+    
+  # Rule-specific configuration
+  python_imports:
+    check_unused: true
+    check_order: true
+    check_wildcards: true
+    allow_wildcard_in_init: true
+    
+  naming_conventions:
+    enforce_snake_case: true
+    enforce_pascal_case: true
+    enforce_upper_case_constants: true
+    min_variable_name_length: 2
+    allow_single_letter_loop_vars: true
+    
+# Severity levels to report
+severity_levels:
+  - "error"
+  - "warning"
+  - "info"
+
+# Integration settings
+integrations:
+  # Pre-commit hook configuration
+  pre_commit:
+    enabled: false
+    fail_on_errors: true
+    fail_on_warnings: false
+    
+  # Git hooks
+  git_hooks:
+    pre_push: false
+    pre_commit: false
+    
+  # CI/CD integration
+  ci_cd:
+    fail_build_on_errors: true
+    fail_build_on_warnings: false
+    generate_reports: true
+    report_formats: ["text", "json"]
+
+# Output configuration
+output:
+  # Default report format
+  default_format: "text"
+  
+  # Include waived issues in reports
+  show_waived_issues: true
+  
+  # Include performance statistics
+  show_performance_stats: true
+  
+  # Color output (for terminal)
+  use_colors: true
+  
+  # Verbose output
+  verbose: false
+
+# Auto-fix configuration
+auto_fix:
+  # Enable auto-fix by default
+  enabled: true
+  
+  # Backup files before auto-fixing
+  backup_files: true
+  
+  # Maximum number of fixes per file
+  max_fixes_per_file: 10
+  
+  # Rules that are allowed to auto-fix
+  allowed_rules:
+    - "python_imports"
+    # Note: naming_conventions doesn't support auto-fix due to complexity
+
+# Notification settings
+notifications:
+  # Notify when waivers are about to expire
+  waiver_expiry_warning_days: 7
+  
+  # Notify when too many waivers exist
+  max_waivers_per_file: 5
+  max_waivers_per_rule: 20

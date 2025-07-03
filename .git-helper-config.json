@@ -1,0 +1,22 @@
+{
+  "github": {
+    "owner": "rkudipud",
+    "repo": "gha_poc",
+    "token": ""
+  },
+  "jira": {
+    "base_url": "",
+    "token": ""
+  },
+  "branch_naming": {
+    "feature": "feature/{jira}-{description}",
+    "bugfix": "bugfix/{jira}-{description}",
+    "hotfix": "hotfix/{jira}-{description}"
+  },
+  "main_branch": "main",
+  "protected_branches": [
+    "main",
+    "develop",
+    "release/*"
+  ]
+}

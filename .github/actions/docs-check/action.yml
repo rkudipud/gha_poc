@@ -1,0 +1,218 @@
+name: "Documentation Quality Check"
+description: "Validates README, docstrings, and changelog quality"
+
+inputs:
+  check_readme:
+    description: 'Check README.md quality'
+    required: false
+    default: 'true'
+  check_docstrings:
+    description: 'Check Python docstring coverage'
+    required: false
+    default: 'true'
+  check_changelog:
+    description: 'Check CHANGELOG presence and format'
+    required: false
+    default: 'false'
+  min_readme_length:
+    description: 'Minimum README length in characters'
+    required: false
+    default: '500'
+
+outputs:
+  docs_score:
+    description: 'Documentation quality score (0-100)'
+    value: ${{ steps.calculate-score.outputs.score }}
+  result:
+    description: 'Overall result (pass/fail)'
+    value: ${{ steps.evaluate.outputs.result }}
+  readme_score:
+    description: 'README quality score'
+    value: ${{ steps.check-readme.outputs.score }}
+  docstring_score:
+    description: 'Docstring coverage score'
+    value: ${{ steps.check-docstrings.outputs.score }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Documentation Tools
+      shell: bash
+      run: |
+        echo "📚 Setting up documentation checking tools..."
+        pip install pydocstyle interrogate || true
+
+    - name: Check README Quality
+      id: check-readme
+      shell: bash
+      run: |
+        echo "📖 Checking README.md quality..."
+        
+        README_SCORE=0
+        
+        if [ -f "README.md" ]; then
+          README_LENGTH=$(wc -c < README.md)
+          MIN_LENGTH=${{ inputs.min_readme_length }}
+          
+          echo "README.md found - Length: $README_LENGTH characters"
+          
+          # Score based on length
+          if [ $README_LENGTH -ge $MIN_LENGTH ]; then
+            README_SCORE=90
+            echo "✅ README length meets minimum requirement"
+          else
+            README_SCORE=50
+            echo "⚠️ README shorter than recommended ($MIN_LENGTH chars)"
+          fi
+          
+          # Check for common sections
+          if grep -qi "installation\|setup\|getting started" README.md; then
+            README_SCORE=$((README_SCORE + 5))
+            echo "✅ Installation/setup section found"
+          fi
+          
+          if grep -qi "usage\|examples\|quickstart" README.md; then
+            README_SCORE=$((README_SCORE + 5))
+            echo "✅ Usage/examples section found"
+          fi
+          
+          # Cap at 100
+          if [ $README_SCORE -gt 100 ]; then
+            README_SCORE=100
+          fi
+        else
+          echo "❌ README.md not found"
+          README_SCORE=0
+        fi
+        
+        echo "score=$README_SCORE" >> $GITHUB_OUTPUT
+        echo "📊 README Score: $README_SCORE/100"
+
+    - name: Check Docstring Coverage
+      id: check-docstrings
+      shell: bash
+      run: |
+        echo "📝 Checking Python docstring coverage..."
+        
+        DOCSTRING_SCORE=0
+        
+        if [ "${{ inputs.check_docstrings }}" = "true" ]; then
+          # Find Python files
+          PYTHON_FILES=$(find . -name "*.py" -not -path "./venv/*" -not -path "./.venv/*" | head -10)
+          
+          if [ -n "$PYTHON_FILES" ]; then
+            echo "Found Python files, checking docstring coverage..."
+            
+            # Use interrogate if available, otherwise basic check
+            if command -v interrogate &> /dev/null; then
+              COVERAGE=$(interrogate -v . 2>/dev/null | grep "Overall coverage" | grep -o '[0-9]*\.[0-9]*' | head -1)
+              if [ -n "$COVERAGE" ]; then
+                DOCSTRING_SCORE=$(printf "%.0f" "$COVERAGE")
+                echo "✅ Docstring coverage: ${COVERAGE}%"
+              else
+                DOCSTRING_SCORE=75  # Default reasonable score
+                echo "ℹ️ Using default docstring score"
+              fi
+            else
+              # Basic check - count files with docstrings
+              TOTAL_FILES=$(echo "$PYTHON_FILES" | wc -w)
+              FILES_WITH_DOCSTRINGS=0
+              
+              for file in $PYTHON_FILES; do
+                if head -20 "$file" | grep -q '"""'; then
+                  FILES_WITH_DOCSTRINGS=$((FILES_WITH_DOCSTRINGS + 1))
+                fi
+              done
+              
+              if [ $TOTAL_FILES -gt 0 ]; then
+                DOCSTRING_SCORE=$(( (FILES_WITH_DOCSTRINGS * 100) / TOTAL_FILES ))
+                echo "Basic docstring check: $FILES_WITH_DOCSTRINGS/$TOTAL_FILES files have docstrings"
+              else
+                DOCSTRING_SCORE=100  # No Python files to check
+              fi
+            fi
+          else
+            echo "ℹ️ No Python files found for docstring checking"
+            DOCSTRING_SCORE=100
+          fi
+        else
+          echo "ℹ️ Docstring checking disabled"
+          DOCSTRING_SCORE=100
+        fi
+        
+        echo "score=$DOCSTRING_SCORE" >> $GITHUB_OUTPUT
+        echo "📊 Docstring Score: $DOCSTRING_SCORE/100"
+
+    - name: Check Changelog
+      id: check-changelog
+      shell: bash
+      run: |
+        echo "📅 Checking changelog..."
+        
+        CHANGELOG_SCORE=100  # Default to passing
+        
+        if [ "${{ inputs.check_changelog }}" = "true" ]; then
+          if [ -f "CHANGELOG.md" ] || [ -f "CHANGELOG.rst" ] || [ -f "CHANGES.md" ]; then
+            echo "✅ Changelog file found"
+            CHANGELOG_SCORE=100
+          else
+            echo "⚠️ No changelog file found"
+            CHANGELOG_SCORE=50
+          fi
+        else
+          echo "ℹ️ Changelog checking disabled"
+        fi
+        
+        echo "score=$CHANGELOG_SCORE" >> $GITHUB_OUTPUT
+
+    - name: Calculate Overall Documentation Score
+      id: calculate-score
+      shell: bash
+      run: |
+        README_SCORE=${{ steps.check-readme.outputs.score }}
+        DOCSTRING_SCORE=${{ steps.check-docstrings.outputs.score }}
+        CHANGELOG_SCORE=${{ steps.check-changelog.outputs.score }}
+        
+        # Weighted average: README (50%), Docstrings (40%), Changelog (10%)
+        OVERALL_SCORE=$(echo "scale=0; ($README_SCORE * 50 + $DOCSTRING_SCORE * 40 + $CHANGELOG_SCORE * 10) / 100" | bc)
+        
+        echo "score=$OVERALL_SCORE" >> $GITHUB_OUTPUT
+        echo "📊 Overall Documentation Score: $OVERALL_SCORE/100"
+
+    - name: Evaluate Result
+      id: evaluate
+      shell: bash
+      run: |
+        SCORE=${{ steps.calculate-score.outputs.score }}
+        
+        if [ $SCORE -ge 70 ]; then
+          echo "result=pass" >> $GITHUB_OUTPUT
+          echo "✅ Documentation quality check passed"
+        else
+          echo "result=fail" >> $GITHUB_OUTPUT
+          echo "❌ Documentation quality needs improvement"
+        fi
+
+    - name: Generate Documentation Report
+      shell: bash
+      run: |
+        cat > docs-report.md << EOF
+# Documentation Quality Report
+
+## Overall Score: ${{ steps.calculate-score.outputs.score }}/100
+
+### Component Scores:
+- **README.md**: ${{ steps.check-readme.outputs.score }}/100
+- **Docstrings**: ${{ steps.check-docstrings.outputs.score }}/100  
+- **Changelog**: ${{ steps.check-changelog.outputs.score }}/100
+
+### Recommendations:
+$(if [ ${{ steps.check-readme.outputs.score }} -lt 80 ]; then echo "- Improve README.md content and structure"; fi)
+$(if [ ${{ steps.check-docstrings.outputs.score }} -lt 80 ]; then echo "- Add more comprehensive docstrings"; fi)
+$(if [ ${{ steps.check-changelog.outputs.score }} -lt 80 ]; then echo "- Consider adding a changelog"; fi)
+
+---
+Generated: $(date)
+EOF
+
+        echo "📄 Documentation report generated: docs-report.md"
