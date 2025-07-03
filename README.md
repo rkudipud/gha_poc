@@ -28,12 +28,12 @@ For more information about the CI/CD components, see the [DevOps README](devops/
 All CI/CD and tooling documentation has been moved to the `devops/docs/` directory:
 
 - [Architecture Documentation](devops/docs/ARCHITECTURE.md)
-- [CI/CD Workflow Guide](devops/docs/WORKFLOW.md)
-- [Script Usage Guide](devops/docs/SCRIPT_USAGE.md)
-- [Consistency Checker Documentation](devops/docs/CONSISTENCY_CHECKER.md)
-- [Waivers Documentation](devops/docs/WAIVERS.md)
-- [GitHub Actions Documentation](devops/docs/GITHUB_ACTIONS.md)
+- [Consistency Checker Guide](devops/docs/CONSISTENCY_CHECKER.md)
+- [GitHub Actions Guide](devops/docs/GITHUB_ACTIONS.md)
 - [Quick Start Guide](devops/docs/QUICK_START.md)
+- [Script Usage Guide](devops/docs/SCRIPT_USAGE.md)
+- [Workflow Guide](devops/docs/WORKFLOW.md)
+- [Pre-commit Hook Guide](devops/docs/PRE_COMMIT_HOOK.md)
 
 ## Using the Tools
 

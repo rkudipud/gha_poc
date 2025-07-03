@@ -22,6 +22,7 @@ devops/
     ├── CONSISTENCY_CHECKER.md # Consistency checker guide
     ├── GITHUB_ACTIONS.md     # GitHub Actions documentation
     ├── git-helper.md         # Git helper documentation
+    ├── PRE_COMMIT_HOOK.md    # Pre-commit hook guide
     ├── QUICK_START.md        # Quick start guide
     ├── setup.md              # Setup script documentation
     ├── SCRIPT_USAGE.md       # Script usage guide
