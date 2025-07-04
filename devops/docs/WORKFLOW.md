@@ -1,151 +1,414 @@
-# CI/CD Workflow Documentation
+# Development Workflow
 
 ## Overview
 
-This document describes the CI/CD workflow used in this project, detailing how code changes move from local development through validation to deployment.
+This document describes the complete CI/CD workflow for daily development, detailing how code changes move from local development through validation to deployment using the comprehensive DevOps system.
 
-## Workflow Stages
+## 🔄 Complete Development Lifecycle
 
-### 1. Local Development
+### Stage 1: Local Development
 
-Developers work locally with the following tools:
+Developers work locally with these integrated tools:
 
-- **Git Helper**: CLI tool for branch management and workflow operations
-- **Consistency Checker**: Local validation to catch issues before pushing
+- **Git Helper CLI**: Streamlined Git workflow automation
+- **Consistency Checker**: Local code quality validation
+- **Pre-commit Hooks**: Automatic validation before commits
 - **Setup Tool**: Environment and configuration management
 
-### 2. Branch Validation
+### Stage 2: Branch Validation
 
-When code is pushed to a feature branch:
+When code is pushed to a feature branch, the automated pipeline triggers:
 
-1. **Branch Lint Workflow Trigger**: Automatically starts on push (except to main)
-2. **Smart Change Detection**: Identifies modified files for efficient processing
-3. **Python Lint**: Code style and quality checks
-4. **Waiver Validation**: Applies centralized waivers to filter false positives
-5. **Issue Creation**: Automatically creates/updates GitHub issues for failures
-6. **Notification**: Sends email or other notifications about failures
+1. **Branch Lint Workflow** (`.github/workflows/branch-lint-check.yml`)
+   - **Smart Change Detection**: Identifies modified files
+   - **Python Linting**: Enhanced linting with waiver support
+   - **Consistency Validation**: Rules-based code consistency
+   - **Waiver Processing**: Applies approved exceptions
+   - **Issue Management**: Auto-creates/updates GitHub issues
+   - **Notifications**: Email alerts for failures
 
-### 3. Pull Request Validation
+### Stage 3: Pull Request Validation
 
 When a pull request is created or updated:
 
-1. **PR Validation Workflow Trigger**: Starts on PR events
-2. **Config Loading**: Loads test configuration from `pr-test-config.yml`
-3. **Hard Checks Execution**: Runs must-pass checks (security, branch protection)
-4. **Soft Checks Execution**: Runs weighted quality checks (lint, coverage, etc.)
-5. **Score Calculation**: Computes weighted score based on test results
-6. **Decision**: Auto-merge, request review, or block based on score thresholds
+1. **PR Validation Workflow** (`.github/workflows/pr-validation.yml`)
+   - **Configuration Loading**: Reads `.github/pr-test-config.yml`
+   - **Hard Checks Execution**: Must-pass security and compliance checks
+   - **Soft Checks Execution**: Weighted quality assessments
+   - **Score Calculation**: Computes overall quality score
+   - **Automated Decision**: Auto-merge, review, or block based on thresholds
 
-### 4. Main Branch Protection
+### Stage 4: Main Branch Protection
 
-The main branch is protected by:
+The main branch is protected through:
 
-1. **Required Status Checks**: All critical checks must pass
-2. **Branch Protection Rules**: No direct pushes allowed
-3. **Auto-Merge Criteria**: Score ≥ 85% for automatic merge
-4. **Manual Review**: Required for scores between 65-84%
-5. **Blocking**: Prevents merging for scores < 65%
+1. **Required Status Checks**: All critical validations must pass
+2. **Branch Protection Rules**: Direct pushes prevented
+3. **Automated Merge**: Score ≥ 85% enables auto-merge
+4. **Manual Review**: Scores 65-84% require review
+5. **Merge Blocking**: Scores < 65% block merging
 
-## Workflow Diagrams
+## 🎯 GitHub Actions Architecture
+
+### Core Workflows
+
+```
+.github/workflows/
+├── branch-lint-check.yml     # Feature branch validation
+└── pr-validation.yml         # Pull request validation and scoring
+```
+
+### Reusable Actions
+
+```
+.github/actions/
+├── python-lint-enhanced/     # Enhanced Python linting with waivers
+├── consistency-check/        # Code consistency validation
+├── security-scan/           # Security vulnerability scanning
+├── coverage-check/          # Test coverage analysis
+├── docs-check/              # Documentation validation
+├── branch-protection-check/ # Branch protection compliance
+├── test-orchestrator/       # Test execution coordination
+└── email-notification/      # Result notification system
+```
+
+### Configuration Files
+
+```
+.github/
+├── pr-test-config.yml       # Master test configuration
+├── workflows/               # Workflow definitions
+└── actions/                 # Reusable action components
+```
+
+## 📊 Validation Pipeline Flow
 
 ### Branch Push Flow
 
-```
-┌─────────────┐     ┌──────────────┐     ┌─────────────────┐
-│  Developer  │     │  Git Helper  │     │   GitHub        │
-│  Workspace  │────►│  CLI Tool    │────►│   Repository    │
-└─────────────┘     └──────────────┘     └─────────────────┘
-                                                │
-                                                ▼
-                                         ┌─────────────────┐
-                                         │  Branch Lint    │
-                                         │  Workflow       │
-                                         └─────────────────┘
-                                                │
-                    ┌─────────────────┐        │
-                    │  GitHub Issues  │◄───────┘
-                    │  (If failures)  │
-                    └─────────────────┘
+```mermaid
+sequenceDiagram
+    participant D as Developer
+    participant L as Local Tools
+    participant G as GitHub
+    participant B as Branch CI
+    participant I as Issues
+
+    D->>L: git push origin feature-branch
+    L->>G: Push commits
+    G->>B: Trigger branch-lint-check.yml
+    B->>B: Smart change detection
+    B->>B: Python lint + consistency check
+    B->>B: Apply waivers
+    alt Failures found
+        B->>I: Create/update GitHub issue
+        B->>D: Send notification
+    else All checks pass
+        B->>D: Success notification
+    end
 ```
 
 ### PR Validation Flow
 
+```mermaid
+sequenceDiagram
+    participant D as Developer
+    participant G as GitHub
+    participant P as PR Workflow
+    participant H as Hard Checks
+    participant S as Soft Checks
+
+    D->>G: Create Pull Request
+    G->>P: Trigger pr-validation.yml
+    P->>P: Load pr-test-config.yml
+    
+    par Hard Checks (Must Pass)
+        P->>H: security-scan
+        P->>H: branch-protection-check
+        P->>H: compliance checks
+    end
+    
+    par Soft Checks (Scored)
+        P->>S: python-lint-enhanced (25%)
+        P->>S: coverage-check (20%)
+        P->>S: consistency-check (15%)
+        P->>S: docs-check (10%)
+        P->>S: test-orchestrator (30%)
+    end
+    
+    P->>P: Calculate weighted score
+    
+    alt Score >= 85%
+        P->>G: Auto-merge PR
+    else Score 65-84%
+        P->>G: Require manual review
+    else Score < 65%
+        P->>G: Block PR merge
+    end
 ```
-┌─────────────┐     ┌────────────────┐     ┌─────────────────┐
-│  Developer  │     │  Pull Request  │     │  PR Validation  │
-│  Creates PR │────►│  Creation      │────►│  Workflow       │
-└─────────────┘     └────────────────┘     └─────────────────┘
-                                                │
-                                                ▼
-┌───────────────┐     ┌──────────────┐     ┌─────────────────┐
-│ Auto-Merge    │     │ Score-Based  │     │  Test Suite     │
-│ Decision      │◄────┤ Evaluation   │◄────┤  Execution      │
-└───────────────┘     └──────────────┘     └─────────────────┘
+
+## 🛠️ Developer Workflow Steps
+
+### Daily Development Process
+
+```bash
+# 1. Initial Setup (one-time)
+python devops/release_automation/setup.py
+
+# 2. Create feature branch
+python devops/release_automation/git_helper.py create-branch --type feature --issue 123
+
+# 3. Develop and validate locally
+python devops/consistency_checker/checker.py  # Local validation
+git add .
+git commit -m "Implement feature"  # Pre-commit hook runs
+
+# 4. Push and monitor branch validation
+python devops/release_automation/git_helper.py commit-push --message "Implement feature"
+python devops/release_automation/git_helper.py check-status
+
+# 5. Create and monitor PR
+python devops/release_automation/git_helper.py create-pr --title "Add new feature"
+# Monitor GitHub UI for PR validation results
 ```
 
-## Key Components
+### Local Validation Tools
 
-### 1. GitHub Workflows
+#### Consistency Checker
+```bash
+# Run all checks
+python devops/consistency_checker/checker.py
 
-- **branch-lint-check.yml**: Triggered on push to feature branches
-- **pr-validation-modular.yml**: Triggered on PR events
+# Run specific rules
+python devops/consistency_checker/checker.py --rule python_imports
 
-### 2. Reusable Actions
+# Auto-fix issues
+python devops/consistency_checker/checker.py --fix
 
-- **python-lint-enhanced**: Enhanced Python linting with waiver support
-- **security-scan**: Security vulnerability and secret scanning
-- **coverage-check**: Test coverage analysis
-- **consistency-check**: Code consistency validation
-- **branch-protection-check**: Branch protection compliance
-- **test-orchestrator**: Central test coordination
+# Generate reports
+python devops/consistency_checker/checker.py --report-format html
+```
 
-### 3. Configuration Files
+#### Configuration Manager
+```bash
+# Validate PR test configuration
+python devops/release_automation/test_config_manager.py --validate
 
-- **pr-test-config.yml**: Master test configuration
-- **waivers.yml**: Centralized lint and consistency waivers
+# Update test thresholds
+python devops/release_automation/test_config_manager.py --set-threshold auto_merge 90
+```
 
-## Using the Workflow
+## 📋 Key System Components
 
-### For Developers
+### DevOps Tools (`devops/`)
 
-1. **Setup Environment**: `python devops/release_automation/setup.py` to configure tools
-2. **Create Branch**: `python devops/release_automation/git_helper.py create-branch --type feature --issue 123 --description "add-feature"`
-3. **Make Changes**: Develop your feature or fix
-4. **Local Validation**: `python devops/consistency_checker/checker.py` to catch issues early
-5. **Commit Changes**: `python devops/release_automation/git_helper.py commit-push --message "Implement feature"`
-6. **Check Status**: `python devops/release_automation/git_helper.py check-status` to monitor branch validation
-7. **Create PR**: `python devops/release_automation/git_helper.py create-pr --title "Add feature"`
-8. **Monitor PR**: Check GitHub UI for validation progress and results
+#### Release Automation (`devops/release_automation/`)
+- **git_helper.py**: Git workflow automation and productivity
+- **setup.py**: Environment setup and configuration
+- **test_config_manager.py**: PR test configuration management
 
-### For Maintainers
+#### Consistency Checker (`devops/consistency_checker/`)
+- **checker.py**: Main validation framework
+- **checker_config.yml**: Rules configuration
+- **waivers.yml**: Exception management
+- **rules/**: Pluggable validation rules
+  - `python_imports/`: Import order and style validation
+  - `naming_conventions/`: Naming pattern enforcement
 
-1. **Review Configuration**: Manage test weights in `.github/pr-test-config.yml`
-2. **Waiver Management**: Review and approve waivers in `devops/consistency_checker/waivers.yml`
-3. **Monitor Metrics**: Track pipeline health and success rates
-4. **Workflow Updates**: Modify workflow files for process changes
+### GitHub Integration (`.github/`)
 
-For detailed information about GitHub Actions implementation and usage, see [GitHub Actions Documentation](GITHUB_ACTIONS.md).
+#### Workflows
+- **branch-lint-check.yml**: Automated branch validation
+- **pr-validation.yml**: Comprehensive PR validation and scoring
 
-## Troubleshooting
+#### Actions (Reusable Components)
+- **python-lint-enhanced/**: Advanced Python linting with waiver support
+- **consistency-check/**: Code consistency validation
+- **security-scan/**: Security vulnerability and secret detection
+- **coverage-check/**: Test coverage analysis and reporting
+- **docs-check/**: Documentation quality validation
+- **branch-protection-check/**: Branch protection compliance
+- **test-orchestrator/**: Centralized test execution
+- **email-notification/**: Result notification system
+
+#### Configuration
+- **pr-test-config.yml**: Master configuration for test weights and thresholds
+
+### Project Files
+
+#### Core Scripts
+- **pandora_tc_ext_fm.py**: Main project module
+- **make_venv.csh**: Virtual environment setup script
+- **requirements.txt**: Python dependencies
+- **crt.pre.install**: Pre-installation requirements
+
+## 🔧 Configuration Management
+
+### Test Configuration (`.github/pr-test-config.yml`)
+
+```yaml
+global_config:
+  auto_merge_threshold: 85     # Auto-merge if score >= 85%
+  manual_review_threshold: 65  # Review required if 65-84%
+  block_threshold: 64          # Block if score <= 64%
+  parallel_execution: true
+  timeout_minutes: 30
+
+test_suite:
+  # Hard checks (must pass)
+  - id: "security_critical"
+    enforcement: "hard"
+    weight: 0
+    action_path: ".github/actions/security-scan"
+    
+  # Soft checks (weighted scoring)
+  - id: "python_lint_enhanced"
+    enforcement: "soft"
+    weight: 25
+    action_path: ".github/actions/python-lint-enhanced"
+    
+  - id: "coverage_check"
+    enforcement: "soft"
+    weight: 20
+    action_path: ".github/actions/coverage-check"
+```
+
+### Waiver Management (`devops/consistency_checker/waivers.yml`)
+
+```yaml
+settings:
+  default_expiry_days: 90
+  expiry_warning_days: 14
+  max_waivers_per_file: 10
+
+rule_waivers:
+  - file: "legacy_module.py"
+    rule: "E501"
+    reason: "Legacy code with complex algorithms"
+    approved_by: "tech-lead@company.com"
+    expires: "2025-12-31"
+
+line_waivers:
+  - violation_line: "config.py:45:80: E501 line too long"
+    reason: "Configuration URL cannot be split"
+    approved_by: "senior-dev@company.com"
+    expires: "2025-06-30"
+```
+
+## 🔍 Monitoring and Troubleshooting
 
 ### Branch Validation Issues
 
-- **Lint Failures**: Check exact error and fix or apply waiver if needed
-- **Waiver Problems**: Verify waiver format and approval
-- **Pipeline Timeouts**: Check for long-running or stuck processes
+1. **Lint Failures**
+   - Check GitHub Actions logs for specific errors
+   - Run local consistency checker: `python devops/consistency_checker/checker.py`
+   - Apply waivers if issues cannot be fixed immediately
+
+2. **Waiver Problems**
+   - Verify waiver format in `devops/consistency_checker/waivers.yml`
+   - Ensure approval and expiration fields are present
+   - Check file patterns match actual file paths
+
+3. **Pipeline Timeouts**
+   - Review action timeout settings in `pr-test-config.yml`
+   - Check for long-running or infinite loops in code
 
 ### PR Validation Issues
 
-- **Hard Check Failures**: Must be fixed before merge
-- **Low Score**: Address individual test failures to improve score
-- **Configuration Problems**: Verify `pr-test-config.yml` format and values
+1. **Hard Check Failures** (Must be fixed)
+   - Security vulnerabilities: Review security-scan results
+   - Branch protection: Ensure compliance with repository settings
+   - Syntax errors: Fix Python syntax issues
 
-## Best Practices
+2. **Low Soft Check Scores**
+   - **Python Lint (25%)**: Fix code style and quality issues
+   - **Coverage (20%)**: Add tests to improve coverage
+   - **Consistency (15%)**: Address consistency checker violations
+   - **Documentation (10%)**: Add/update docstrings and documentation
+   - **Tests (30%)**: Ensure all tests pass
 
-1. **Run Local Checks**: Always run consistency checker before pushing
-2. **Keep PRs Focused**: Each PR should address a single concern
-3. **Regular Syncing**: Keep feature branches updated with main
-4. **Proper Commit Messages**: Use clear, descriptive commit messages
-5. **Address All Feedback**: Fix all automated feedback before requesting review
-6. **Minimal Waivers**: Use waivers only when absolutely necessary
-7. **Use Updated Paths**: Always use the new paths in the `devops` directory
+3. **Configuration Issues**
+   - Validate `pr-test-config.yml` syntax
+   - Use test config manager: `python devops/release_automation/test_config_manager.py --validate`
+
+## 💡 Best Practices
+
+### For Developers
+
+1. **Local-First Approach**
+   - Always run consistency checker before pushing
+   - Use pre-commit hooks for early validation
+   - Fix issues locally rather than in CI
+
+2. **Quality Focus**
+   - Write tests for new features
+   - Update documentation for changes
+   - Address all linting and consistency issues
+
+3. **Efficient Workflow**
+   - Use git_helper CLI for standardized operations
+   - Monitor branch validation before creating PRs
+   - Address automated feedback promptly
+
+### For Maintainers
+
+1. **Configuration Management**
+   - Review and adjust test weights based on team feedback
+   - Monitor auto-merge rates and adjust thresholds
+   - Regularly review and approve waivers
+
+2. **System Maintenance**
+   - Update GitHub Actions versions regularly
+   - Monitor pipeline performance and success rates
+   - Review and expire old waivers
+
+3. **Team Support**
+   - Provide clear feedback on validation failures
+   - Document common issues and solutions
+   - Train team on new tools and processes
+
+## 🚀 Advanced Features
+
+### Environment-Specific Configuration
+
+The system supports different validation criteria for different environments:
+
+```yaml
+environments:
+  development:
+    auto_merge_threshold: 75    # More lenient for dev
+    enabled_checks: ["basic_lint", "security"]
+    
+  staging:
+    auto_merge_threshold: 80    # Moderate requirements
+    
+  production:
+    auto_merge_threshold: 95    # Strictest requirements
+    additional_reviewers: ["security-team", "architecture-team"]
+```
+
+### Smart Change Detection
+
+The branch validation workflow includes intelligent change detection:
+- Only validates modified files for performance
+- Detects file type changes to apply appropriate rules
+- Skips validation for documentation-only changes (configurable)
+
+### Integration Points
+
+The workflow integrates with external systems:
+- **Email Notifications**: Alert teams on validation failures
+- **Issue Tracking**: Auto-create GitHub issues for persistent problems
+- **Metrics Collection**: Track validation success rates and performance
+- **Security Scanning**: Integration with security vulnerability databases
+
+---
+
+## 📚 Related Documentation
+
+- **[SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md)** - Complete system design and architecture
+- **[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md)** - Comprehensive developer tools guide
+- **[VALIDATION_SYSTEM.md](VALIDATION_SYSTEM.md)** - Detailed validation framework documentation
+
+---
+
+This workflow provides a comprehensive, automated, and developer-friendly approach to maintaining code quality while ensuring rapid development velocity and robust security practices.

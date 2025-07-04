@@ -195,16 +195,17 @@ python devops/release_automation/test_config_manager.py --check-env
 │
 ├── .github/                      # GitHub Actions workflows
 │   ├── workflows/                # CI/CD pipeline definitions
+│   │   ├── branch-lint-check.yml # Branch linting automation
+│   │   └── pr-validation.yml     # PR validation pipeline
+│   ├── actions/                  # Reusable GitHub Actions
 │   └── pr-test-config.yml        # PR validation configuration
 │
 └── devops/                       # DevOps automation tools
-    ├── docs/                     # Technical documentation
-    │   ├── ARCHITECTURE.md       # System architecture and design decisions
-    │   ├── CONSISTENCY_CHECKER.md # Consistency checker framework
-    │   ├── GITHUB_ACTIONS.md     # CI/CD pipeline documentation
-    │   ├── WAIVERS.md            # Waiver system documentation
-    │   ├── WORKFLOW.md           # Development workflow
-    │   └── pr-validation.md      # PR validation system details
+    ├── docs/                     # Technical documentation (consolidated)
+    │   ├── SYSTEM_ARCHITECTURE.md # Complete system design and architecture
+    │   ├── DEVELOPER_GUIDE.md     # Developer tools and environment setup
+    │   ├── VALIDATION_SYSTEM.md   # Consistency checker, CI/CD, and validation
+    │   └── WORKFLOW.md            # Complete development workflow reference
     │
     ├── consistency_checker/      # Code consistency validation
     │   ├── checker.py            # Main checker framework
@@ -410,21 +411,19 @@ graph LR
 
 ## 📚 Detailed Documentation
 
-For comprehensive technical details, see the documentation in `devops/docs/`:
+For comprehensive technical details, see the consolidated documentation in `devops/docs/`:
 
-### Architecture & Design
-- **[`devops/docs/ARCHITECTURE.md`](devops/docs/ARCHITECTURE.md)** - System architecture and design decisions
-- **[`devops/docs/WORKFLOW.md`](devops/docs/WORKFLOW.md)** - Development workflow and processes
+### System Architecture & Design
+- **[`devops/docs/SYSTEM_ARCHITECTURE.md`](devops/docs/SYSTEM_ARCHITECTURE.md)** - Complete system architecture, design decisions, and technical diagrams
 
-### Component Documentation
-- **[`devops/docs/CONSISTENCY_CHECKER.md`](devops/docs/CONSISTENCY_CHECKER.md)** - Consistency checker framework
-- **[`devops/docs/GITHUB_ACTIONS.md`](devops/docs/GITHUB_ACTIONS.md)** - CI/CD pipeline documentation
-- **[`devops/docs/pr-validation.md`](devops/docs/pr-validation.md)** - PR validation system details
-- **[`devops/docs/WAIVERS.md`](devops/docs/WAIVERS.md)** - Exception management system
+### Developer Resources
+- **[`devops/docs/DEVELOPER_GUIDE.md`](devops/docs/DEVELOPER_GUIDE.md)** - Environment setup, developer tools, local workflow, and helper scripts
 
-### Setup & Configuration
-- **[`devops/docs/PRE_COMMIT_HOOK.md`](devops/docs/PRE_COMMIT_HOOK.md)** - Pre-commit hook setup
-- **[`devops/docs/SCRIPT_USAGE.md`](devops/docs/SCRIPT_USAGE.md)** - All helper scripts and commands
+### Validation & CI/CD
+- **[`devops/docs/VALIDATION_SYSTEM.md`](devops/docs/VALIDATION_SYSTEM.md)** - Consistency checker, waivers, GitHub Actions, PR validation, and troubleshooting
+
+### Workflow Reference
+- **[`devops/docs/WORKFLOW.md`](devops/docs/WORKFLOW.md)** - Complete development workflow with diagrams and integration points
 
 ---
 

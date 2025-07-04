@@ -1,4 +1,4 @@
-# CI/CD Solution Architecture
+# CI/CD System Architecture
 
 ## System Overview
 
@@ -15,10 +15,8 @@ This enterprise CI/CD solution is designed for **5000+ developers** with a modul
 │ Local Checks ───┼───►│ Branch Lint   ───┼───►│ PR Validation   │
 │ git_helper CLI  │    │ Auto Issues      │    │ Auto Merge      │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
-
 ```
 
-### 1. **Protected Branch Model**
 ```mermaid
 flowchart LR
     Dev[👨‍💻 Developer<br/>Workstation]
@@ -55,9 +53,7 @@ Push to Branch
 │ • Soft Checks   │ (Weighted Score)
 │ • Auto Decision │ (Merge/Review/Block)
 └─────────────────┘
-
 ```
-### 2. **Validation Pipeline**
 
 ```mermaid
 flowchart TD
@@ -88,28 +84,25 @@ flowchart TD
     Decision --> |Merge/Review/Block| Decision
 ```
 
-## 🧩 Modular Components
+## 🧩 System Components
 
 ### GitHub Actions Architecture
 
 ```
 .github/
 ├── workflows/
-│   ├── branch-lint-check.yml     # Branch validation
-│   └── pr-validation-modular.yml # PR validation orchestrator
+│   ├── branch-lint-check.yml     # Branch validation on feature pushes
+│   └── pr-validation.yml         # PR validation and scoring
 │
 ├── actions/                      # Reusable action components
 │   ├── python-lint-enhanced/     # Enhanced Python linting
-│   ├── security-scan/            # Security vulnerability scanning
-│   ├── coverage-check/           # Test coverage analysis  
 │   ├── consistency-check/        # Code consistency validation
-│   ├── branch-protection-check/  # Branch protection compliance
-│   ├── license-check/            # License compliance
-│   ├── docs-check/               # Documentation quality
-│   ├── performance-test/         # Performance regression
-│   ├── integration-tests/        # Integration test suite
-│   ├── test-orchestrator/        # Central test coordinator
-│   └── email-notification/       # Notification system
+│   ├── security-scan/           # Security vulnerability scanning
+│   ├── coverage-check/          # Test coverage analysis
+│   ├── docs-check/              # Documentation validation
+│   ├── branch-protection-check/ # Branch protection compliance
+│   ├── test-orchestrator/       # Test execution coordination
+│   └── email-notification/      # Result notification system
 │
 └── pr-test-config.yml            # Master test configuration
 ```
@@ -161,7 +154,7 @@ git_helper config --set email.notifications true
 ### 2. **Local Consistency Checker**
 ```python
 # Framework Structure
-consistency_checker/
+devops/consistency_checker/
 ├── checker.py              # Main framework
 ├── checker_config.yml      # Configuration
 ├── waivers.yml             # Centralized waivers
@@ -185,14 +178,14 @@ test_suite:
   - id: "security_critical"
     enforcement: "hard"       # Must pass
     weight: 0
-    action_path: ".github/actions/security-scan"
     enabled: true
+    timeout_minutes: 15
     
   - id: "python_lint_enhanced" 
     enforcement: "soft"       # Contributes to score
     weight: 25
-    action_path: ".github/actions/python-lint-enhanced"
     enabled: true
+    timeout_minutes: 10
     
 # Environment-specific overrides
 environments:
@@ -202,7 +195,7 @@ environments:
     auto_merge_threshold: 80
 ```
 
-### 2. **Centralized Waiver Management** (`consistency_checker/waivers.yml`)
+### 2. **Centralized Waiver Management** (`devops/consistency_checker/waivers.yml`)
 ```yaml
 settings:
   default_expiry_days: 90
@@ -245,7 +238,7 @@ sequenceDiagram
     L->>G: Push commits
     G->>A: Trigger branch-lint-check.yml
     A->>A: Smart change detection
-    A->>A: Run python-lint-enhanced
+    A->>A: Run Python linting
     A->>A: Check waivers
     alt Lint failures found
         A->>I: Create/update GitHub issue
@@ -265,7 +258,7 @@ sequenceDiagram
     participant S as Soft Checks
 
     D->>G: Create Pull Request
-    G->>O: Trigger pr-validation-modular.yml
+    G->>O: Trigger pr-validation.yml
     O->>O: Load pr-test-config.yml
     
     par Hard Checks (Parallel)
@@ -277,7 +270,7 @@ sequenceDiagram
     Note over H: Any hard check failure = Block PR
     
     par Soft Checks (Parallel)  
-        O->>S: python-lint-enhanced (25%)
+        O->>S: python-lint (25%)
         O->>S: coverage-check (20%)
         O->>S: performance-test (15%)
         O->>S: integration-tests (15%)
@@ -367,7 +360,7 @@ Self-hosted Runners
 ## 🔧 Extensibility
 
 ### Adding New Checks
-1. **Create Action**: Implement new GitHub Action
+1. **Create Implementation**: Implement new validation logic
 2. **Update Config**: Add to `pr-test-config.yml`
 3. **Set Weight**: Assign appropriate weight for soft checks
 4. **Document**: Update team documentation
