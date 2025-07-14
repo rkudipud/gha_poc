@@ -82,7 +82,8 @@ class GitHelper:
                 "hotfix": "hotfix/{issue}-{description}"
             },
             "main_branch": "main",
-            "protected_branches": ["main", "develop", "release/*"]
+            "protected_branches": ["main", "develop", "release/*"],
+            "admin_users": []
         }
         
         config_file = self.repo_root / '.git_helper_config.json'
@@ -502,8 +503,8 @@ echo "✅ Pre-commit checks passed"
         self._print_success("Git hooks installed successfully")
     
     def delete_branch(self, branch_name: str, force: bool = False):
-        """Delete a branch with ownership verification"""
-        print(f"{Colors.BOLD}=== Branch Deletion with Ownership Verification ==={Colors.END}")
+        """Delete a branch with ownership verification and admin privileges"""
+        print(f"{Colors.BOLD}=== Branch Deletion with Ownership/Admin Verification ==={Colors.END}")
         
         # Check if branch exists locally
         result = self._run_command(['git', 'branch', '--list', branch_name])
@@ -527,8 +528,36 @@ echo "✅ Pre-commit checks passed"
             self._print_error("Could not retrieve Git user configuration")
             return
         
+        # Check if current user is an admin
+        admin_users = self.config.get('admin_users', [])
+        is_admin = False
+        current_user_tuple = (current_user_name, current_user_email)
+        
+        # Check admin status by name, email, or tuple
+        for admin in admin_users:
+            if isinstance(admin, str):
+                # Admin defined as email or name
+                if admin == current_user_email or admin == current_user_name:
+                    is_admin = True
+                    break
+            elif isinstance(admin, dict):
+                # Admin defined as dict with name and email
+                admin_name = admin.get('name', '')
+                admin_email = admin.get('email', '')
+                if (admin_name == current_user_name and admin_email == current_user_email) or \
+                   (admin_email == current_user_email and admin_name == '') or \
+                   (admin_name == current_user_name and admin_email == ''):
+                    is_admin = True
+                    break
+            elif isinstance(admin, (list, tuple)) and len(admin) == 2:
+                # Admin defined as tuple/list [name, email]
+                if admin[0] == current_user_name and admin[1] == current_user_email:
+                    is_admin = True
+                    break
+        
         # Check ownership verification
         ownership_verified = False
+        branch_authors = set()
         
         if branch_exists_locally or branch_exists_remotely:
             # Get commits from the branch to check authorship
@@ -541,7 +570,6 @@ echo "✅ Pre-commit checks passed"
             
             if result.returncode == 0 and result.stdout.strip():
                 commits = result.stdout.strip().split('\n')
-                branch_authors = set()
                 
                 for commit in commits:
                     if '|' in commit:
@@ -549,34 +577,53 @@ echo "✅ Pre-commit checks passed"
                         branch_authors.add((author_name.strip(), author_email.strip()))
                 
                 # Check if current user is one of the authors
-                current_user_tuple = (current_user_name, current_user_email)
                 if current_user_tuple in branch_authors or len(branch_authors) == 0:
                     ownership_verified = True
-                else:
-                    print(f"{Colors.YELLOW}⚠️  Branch ownership verification:{Colors.END}")
-                    print(f"   Current user: {current_user_name} <{current_user_email}>")
-                    print(f"   Branch authors:")
-                    for author_name, author_email in branch_authors:
-                        print(f"     - {author_name} <{author_email}>")
-                    
-                    if not force:
-                        print(f"\n{Colors.RED}❌ You are not an author of this branch{Colors.END}")
-                        print(f"{Colors.CYAN}💡 Use --force flag to override ownership verification{Colors.END}")
-                        return
-                    else:
-                        print(f"\n{Colors.YELLOW}⚠️  Proceeding with force deletion (ownership verification bypassed){Colors.END}")
-                        ownership_verified = True
             else:
                 # No commits specific to this branch (might be empty branch)
                 ownership_verified = True
+        
+        # Determine if user has permission to delete
+        has_permission = is_admin or ownership_verified
+        
+        # Display verification status
+        print(f"\n{Colors.BLUE}🔐 Permission Verification:{Colors.END}")
+        print(f"   Current user: {current_user_name} <{current_user_email}>")
+        
+        if is_admin:
+            print(f"   {Colors.GREEN}✅ Admin privileges: GRANTED{Colors.END}")
+        else:
+            print(f"   {Colors.YELLOW}❌ Admin privileges: DENIED{Colors.END}")
+        
+        if ownership_verified:
+            print(f"   {Colors.GREEN}✅ Branch ownership: VERIFIED{Colors.END}")
+        else:
+            print(f"   {Colors.YELLOW}❌ Branch ownership: NOT VERIFIED{Colors.END}")
+            if branch_authors:
+                print(f"   Branch authors:")
+                for author_name, author_email in branch_authors:
+                    print(f"     - {author_name} <{author_email}>")
+        
+        # Check permission and handle force flag
+        if not has_permission:
+            if not force:
+                print(f"\n{Colors.RED}❌ Permission denied: You are neither an admin nor an owner of this branch{Colors.END}")
+                print(f"{Colors.CYAN}💡 Use --force flag to override verification (not recommended){Colors.END}")
+                return
+            else:
+                print(f"\n{Colors.YELLOW}⚠️  FORCE DELETION: Proceeding despite insufficient permissions{Colors.END}")
+                print(f"{Colors.RED}⚠️  This action bypasses all safety checks!{Colors.END}")
         
         # Check if trying to delete protected branch
         protected_branches = self.config.get('protected_branches', ['main', 'develop'])
         if any(branch_name == protected or 
                (protected.endswith('/*') and branch_name.startswith(protected[:-2])) 
                for protected in protected_branches):
-            self._print_error(f"Cannot delete protected branch: {branch_name}")
-            return
+            if not is_admin:
+                self._print_error(f"Cannot delete protected branch: {branch_name} (Admin privileges required)")
+                return
+            else:
+                print(f"{Colors.YELLOW}⚠️  ADMIN OVERRIDE: Deleting protected branch: {branch_name}{Colors.END}")
         
         # Check if currently on the branch to be deleted
         current_branch = self.get_current_branch()
@@ -595,7 +642,13 @@ echo "✅ Pre-commit checks passed"
         if branch_exists_remotely:
             print(f"   🗑️  Delete remote branch: origin/{branch_name}")
         
-        print(f"\n{Colors.GREEN}✅ Ownership verified: {current_user_name} <{current_user_email}>{Colors.END}")
+        # Show permission summary
+        if is_admin:
+            print(f"\n{Colors.GREEN}✅ Permission granted: Admin user{Colors.END}")
+        elif ownership_verified:
+            print(f"\n{Colors.GREEN}✅ Permission granted: Branch owner{Colors.END}")
+        elif force:
+            print(f"\n{Colors.YELLOW}⚠️  Permission forced: Safety checks bypassed{Colors.END}")
         
         # Confirm deletion
         if not force:
@@ -628,9 +681,45 @@ echo "✅ Pre-commit checks passed"
                 deletion_success = False
         
         if deletion_success:
-            self._print_success(f"Branch '{branch_name}' deleted successfully with ownership verification")
+            permission_type = "admin privileges" if is_admin else "ownership verification" if ownership_verified else "force override"
+            self._print_success(f"Branch '{branch_name}' deleted successfully with {permission_type}")
         else:
             self._print_warning("Branch deletion completed with some errors")
+    
+    def configure_admin_users(self, admin_emails: List[str] = None):
+        """Configure admin users who can delete any branch"""
+        if admin_emails is None:
+            # Interactive configuration
+            print(f"{Colors.BOLD}=== Configure Admin Users ==={Colors.END}")
+            print(f"{Colors.BLUE}ℹ️  Admin users can delete any branch, including protected branches{Colors.END}")
+            print(f"{Colors.BLUE}ℹ️  Enter admin emails (one per line), press Enter twice to finish:{Colors.END}")
+            
+            admin_emails = []
+            while True:
+                email = input(f"{Colors.CYAN}Admin email (or press Enter to finish): {Colors.END}").strip()
+                if not email:
+                    break
+                if '@' in email:
+                    admin_emails.append(email)
+                    print(f"   Added: {email}")
+                else:
+                    print(f"{Colors.YELLOW}⚠️  Invalid email format: {email}{Colors.END}")
+        
+        # Update configuration
+        self.config['admin_users'] = admin_emails
+        config_file = self.repo_root / '.git_helper_config.json'
+        with open(config_file, 'w') as f:
+            json.dump(self.config, f, indent=2)
+        
+        if admin_emails:
+            self._print_success(f"Updated admin users configuration with {len(admin_emails)} users")
+            print(f"{Colors.BLUE}Admin users:{Colors.END}")
+            for email in admin_emails:
+                print(f"   - {email}")
+        else:
+            self._print_info("Admin users list cleared")
+        
+        print(f"\n{Colors.CYAN}💡 Configuration saved to: {config_file}{Colors.END}")
     
 
 def main():
@@ -649,6 +738,8 @@ Examples:
   python git_helper.py sync-main
   python git_helper.py delete-branch --branch-name "feature-branch-name"
   python git_helper.py delete-branch --branch-name "feature-branch-name" --force
+  python git_helper.py configure-admin --emails admin1@company.com admin2@company.com
+  python git_helper.py configure-admin
         """
     )
     
@@ -696,6 +787,10 @@ Examples:
     delete_parser.add_argument('--branch-name', required=True, help='Name of the branch to delete')
     delete_parser.add_argument('--force', action='store_true', help='Force deletion (bypass ownership verification)')
     
+    # Configure admin users command
+    admin_parser = subparsers.add_parser('configure-admin', help='Configure admin users for branch management')
+    admin_parser.add_argument('--emails', nargs='*', help='List of admin email addresses')
+    
     args = parser.parse_args()
     
     if not args.command:
@@ -727,6 +822,8 @@ Examples:
             git_helper.setup_hooks()
         elif args.command == 'delete-branch':
             git_helper.delete_branch(args.branch_name, args.force)
+        elif args.command == 'configure-admin':
+            git_helper.configure_admin_users(args.emails)
         
     except KeyboardInterrupt:
         print(f"\n{Colors.YELLOW}Operation cancelled by user{Colors.END}")
