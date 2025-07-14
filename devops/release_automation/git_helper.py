@@ -281,7 +281,7 @@ class GitHelper:
         """Check CI/CD pipeline status for current branch"""
         current_branch = self.get_current_branch()
         
-        print(f"{Colors.BOLD}=== CI/CD Status for branch: {current_branch} ==={Colors.END}")
+        print(f"{Colors.BOLD}=== CI/CD Status for branch: {current_branch} === {Colors.END}")
         
         # Check for open issues
         self._check_open_issues(current_branch)
@@ -362,8 +362,8 @@ class GitHelper:
             push_result = self._run_command(['git', 'push', 'origin', current_branch])
             if push_result.returncode == 0:
                 self._print_success("Updated branch pushed to remote")
-        else:
-            self._print_warning("Merge conflicts detected. Use 'resolve-conflicts' command.")
+            else:
+                self._print_warning("Merge conflicts detected. Use 'resolve-conflicts' command.")
     
     def resolve_conflicts(self):
         """Help resolve merge conflicts"""
@@ -500,7 +500,138 @@ echo "✅ Pre-commit checks passed"
         pre_commit_hook.chmod(0o755)
         
         self._print_success("Git hooks installed successfully")
-
+    
+    def delete_branch(self, branch_name: str, force: bool = False):
+        """Delete a branch with ownership verification"""
+        print(f"{Colors.BOLD}=== Branch Deletion with Ownership Verification ==={Colors.END}")
+        
+        # Check if branch exists locally
+        result = self._run_command(['git', 'branch', '--list', branch_name])
+        branch_exists_locally = bool(result.stdout.strip())
+        
+        # Check if branch exists on remote
+        result = self._run_command(['git', 'ls-remote', '--heads', 'origin', branch_name])
+        branch_exists_remotely = bool(result.stdout.strip())
+        
+        if not branch_exists_locally and not branch_exists_remotely:
+            self._print_error(f"Branch '{branch_name}' does not exist locally or remotely")
+            return
+        
+        # Get current user information
+        try:
+            user_name_result = self._run_command(['git', 'config', 'user.name'])
+            user_email_result = self._run_command(['git', 'config', 'user.email'])
+            current_user_name = user_name_result.stdout.strip()
+            current_user_email = user_email_result.stdout.strip()
+        except Exception:
+            self._print_error("Could not retrieve Git user configuration")
+            return
+        
+        # Check ownership verification
+        ownership_verified = False
+        
+        if branch_exists_locally or branch_exists_remotely:
+            # Get commits from the branch to check authorship
+            if branch_exists_locally:
+                # Check local branch commits
+                result = self._run_command(['git', 'log', '--pretty=format:%an|%ae', branch_name, '--not', self.config['main_branch']])
+            else:
+                # Check remote branch commits
+                result = self._run_command(['git', 'log', '--pretty=format:%an|%ae', f'origin/{branch_name}', '--not', f'origin/{self.config["main_branch"]}'])
+            
+            if result.returncode == 0 and result.stdout.strip():
+                commits = result.stdout.strip().split('\n')
+                branch_authors = set()
+                
+                for commit in commits:
+                    if '|' in commit:
+                        author_name, author_email = commit.split('|', 1)
+                        branch_authors.add((author_name.strip(), author_email.strip()))
+                
+                # Check if current user is one of the authors
+                current_user_tuple = (current_user_name, current_user_email)
+                if current_user_tuple in branch_authors or len(branch_authors) == 0:
+                    ownership_verified = True
+                else:
+                    print(f"{Colors.YELLOW}⚠️  Branch ownership verification:{Colors.END}")
+                    print(f"   Current user: {current_user_name} <{current_user_email}>")
+                    print(f"   Branch authors:")
+                    for author_name, author_email in branch_authors:
+                        print(f"     - {author_name} <{author_email}>")
+                    
+                    if not force:
+                        print(f"\n{Colors.RED}❌ You are not an author of this branch{Colors.END}")
+                        print(f"{Colors.CYAN}💡 Use --force flag to override ownership verification{Colors.END}")
+                        return
+                    else:
+                        print(f"\n{Colors.YELLOW}⚠️  Proceeding with force deletion (ownership verification bypassed){Colors.END}")
+                        ownership_verified = True
+            else:
+                # No commits specific to this branch (might be empty branch)
+                ownership_verified = True
+        
+        # Check if trying to delete protected branch
+        protected_branches = self.config.get('protected_branches', ['main', 'develop'])
+        if any(branch_name == protected or 
+               (protected.endswith('/*') and branch_name.startswith(protected[:-2])) 
+               for protected in protected_branches):
+            self._print_error(f"Cannot delete protected branch: {branch_name}")
+            return
+        
+        # Check if currently on the branch to be deleted
+        current_branch = self.get_current_branch()
+        if current_branch == branch_name:
+            main_branch = self.config['main_branch']
+            self._print_info(f"Switching from {branch_name} to {main_branch} before deletion")
+            switch_result = self._run_command(['git', 'checkout', main_branch])
+            if switch_result.returncode != 0:
+                self._print_error(f"Failed to switch to {main_branch}")
+                return
+        
+        # Show deletion plan
+        print(f"\n{Colors.BLUE}📋 Deletion Plan:{Colors.END}")
+        if branch_exists_locally:
+            print(f"   🗑️  Delete local branch: {branch_name}")
+        if branch_exists_remotely:
+            print(f"   🗑️  Delete remote branch: origin/{branch_name}")
+        
+        print(f"\n{Colors.GREEN}✅ Ownership verified: {current_user_name} <{current_user_email}>{Colors.END}")
+        
+        # Confirm deletion
+        if not force:
+            response = input(f"\n{Colors.CYAN}Proceed with branch deletion? (y/n): {Colors.END}")
+            if response.lower() != 'y':
+                self._print_info("Branch deletion cancelled")
+                return
+        
+        # Perform deletion
+        deletion_success = True
+        
+        # Delete local branch
+        if branch_exists_locally:
+            self._print_info(f"Deleting local branch: {branch_name}")
+            delete_result = self._run_command(['git', 'branch', '-D', branch_name])
+            if delete_result.returncode == 0:
+                self._print_success(f"Local branch '{branch_name}' deleted successfully")
+            else:
+                self._print_error(f"Failed to delete local branch: {branch_name}")
+                deletion_success = False
+        
+        # Delete remote branch
+        if branch_exists_remotely:
+            self._print_info(f"Deleting remote branch: origin/{branch_name}")
+            delete_remote_result = self._run_command(['git', 'push', 'origin', '--delete', branch_name])
+            if delete_remote_result.returncode == 0:
+                self._print_success(f"Remote branch 'origin/{branch_name}' deleted successfully")
+            else:
+                self._print_error(f"Failed to delete remote branch: {branch_name}")
+                deletion_success = False
+        
+        if deletion_success:
+            self._print_success(f"Branch '{branch_name}' deleted successfully with ownership verification")
+        else:
+            self._print_warning("Branch deletion completed with some errors")
+    
 
 def main():
     """Main CLI interface"""
@@ -516,6 +647,8 @@ Examples:
   python git_helper.py check-status
   python git_helper.py create-pr --title "Add new feature"
   python git_helper.py sync-main
+  python git_helper.py delete-branch --branch-name "feature-branch-name"
+  python git_helper.py delete-branch --branch-name "feature-branch-name" --force
         """
     )
     
@@ -558,6 +691,11 @@ Examples:
     # Setup command
     subparsers.add_parser('setup-hooks', help='Setup Git hooks')
     
+    # Delete branch command
+    delete_parser = subparsers.add_parser('delete-branch', help='Delete a branch with ownership verification')
+    delete_parser.add_argument('--branch-name', required=True, help='Name of the branch to delete')
+    delete_parser.add_argument('--force', action='store_true', help='Force deletion (bypass ownership verification)')
+    
     args = parser.parse_args()
     
     if not args.command:
@@ -587,6 +725,8 @@ Examples:
             git_helper.cleanup_merged_branches()
         elif args.command == 'setup-hooks':
             git_helper.setup_hooks()
+        elif args.command == 'delete-branch':
+            git_helper.delete_branch(args.branch_name, args.force)
         
     except KeyboardInterrupt:
         print(f"\n{Colors.YELLOW}Operation cancelled by user{Colors.END}")
