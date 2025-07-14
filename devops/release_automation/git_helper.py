@@ -7,6 +7,7 @@ the enterprise CI/CD pipeline without needing deep Git knowledge.
 
 Usage:
     python devops/release_automation/git_helper.py create-branch --type feature --issue 123 --description "add-new-feature"
+    python devops/release_automation/git_helper.py create-branch --type bugfix --branch-name "custom-branch-name"
     python devops/release_automation/git_helper.py commit-push --message "Implement new feature"
     python devops/release_automation/git_helper.py check-status
     python devops/release_automation/git_helper.py create-pr --title "Add new feature"
@@ -18,6 +19,8 @@ import subprocess
 import sys
 import json
 import re
+import random
+import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
@@ -87,7 +90,7 @@ class GitHelper:
             json.dump(config, f, indent=2)
         
         print(f"{Colors.YELLOW}Created default config at {config_file}")
-        print(f"Please update with your GitHub and JIRA details{Colors.END}")
+        print(f"Please update with your GitHub details{Colors.END}")
         return config
     
     def _run_command(self, command: List[str], capture_output=True) -> subprocess.CompletedProcess:
@@ -121,6 +124,25 @@ class GitHelper:
         """Print info message"""
         print(f"{Colors.BLUE}ℹ️  {message}{Colors.END}")
     
+    def _show_branch_status(self, branch_name: str):
+        """Show current branch status after creation"""
+        print(f"\n{Colors.BOLD}=== Branch Status ==={Colors.END}")
+        print(f"📍 Current branch: {Colors.GREEN}{branch_name}{Colors.END}")
+        print(f"🌿 Based on: {Colors.BLUE}{self.config['main_branch']}{Colors.END}")
+        
+        # Show recent commits to confirm we're in the right place
+        result = self._run_command(['git', 'log', '--oneline', '-3'])
+        if result.returncode == 0 and result.stdout.strip():
+            print(f"\n{Colors.BLUE}📝 Recent commits:{Colors.END}")
+            for line in result.stdout.strip().split('\n')[:3]:
+                print(f"   {line}")
+        
+        print(f"\n{Colors.CYAN}💡 Next steps:{Colors.END}")
+        print("   1. Make your code changes")
+        print("   2. Run: python devops/release_automation/git_helper.py commit-push --message 'Your message'")
+        print("   3. Create PR when ready")
+        print()
+
     def get_current_branch(self) -> str:
         """Get current Git branch"""
         result = self._run_command(['git', 'branch', '--show-current'])
@@ -136,7 +158,7 @@ class GitHelper:
         result = self._run_command(['git', 'status', '--porcelain'])
         return len(result.stdout.strip()) == 0
     
-    def create_branch(self, branch_type: str, issue_number: str, description: str):
+    def create_branch(self, branch_type: str, issue_number: str = None, description: str = None, custom_branch_name: str = None):
         """Create a new feature/bugfix/hotfix branch"""
         if not self.is_clean_working_tree():
             self._print_error("Working tree is not clean. Please commit or stash changes first.")
@@ -153,16 +175,36 @@ class GitHelper:
             self._print_error(f"Failed to pull latest changes from {main_branch}")
             return
         
-        # Create branch name
-        issue_prefix = self.config.get('issue_tracking', {}).get('issue_prefix', 'GH')
-        if not issue_number.startswith(issue_prefix):
-            issue_number = f"{issue_prefix}-{issue_number}"
-        
-        branch_template = self.config['branch_naming'].get(branch_type, 'feature/{issue}-{description}')
-        branch_name = branch_template.format(
-            issue=issue_number.upper(),
-            description=description.lower().replace(' ', '-').replace('_', '-')
-        )
+        # Use custom branch name if provided
+        if custom_branch_name:
+            branch_name = custom_branch_name
+        else:
+            # Validate inputs for automatic naming
+            if not issue_number and not description:
+                self._print_error("When not using --branch-name, you must provide either --issue, --description, or both")
+                return
+                
+            # Create branch name using default naming scheme
+            if issue_number:
+                # Use provided issue number
+                issue_prefix = self.config.get('issue_tracking', {}).get('issue_prefix', 'GH')
+                if not issue_number.startswith(issue_prefix):
+                    issue_number = f"{issue_prefix}-{issue_number}"
+                
+                branch_template = self.config['branch_naming'].get(branch_type, 'feature/{issue}-{description}')
+                branch_name = branch_template.format(
+                    issue=issue_number.upper(),
+                    description=description.lower().replace(' ', '-').replace('_', '-') if description else 'task'
+                )
+            else:
+                # Generate random branch name without issue number (description-only mode)
+                # Generate a random identifier for the branch
+                timestamp = int(time.time() % 10000)  # Last 4 digits of timestamp
+                random_id = random.randint(100, 999)
+                
+                # Create branch name: type/description-randomid
+                sanitized_description = description.lower().replace(' ', '-').replace('_', '-')
+                branch_name = f"{branch_type}/{sanitized_description}-{random_id}{timestamp}"
         
         # Validate branch name
         if not re.match(r'^[a-zA-Z0-9\-_/]+$', branch_name):
@@ -170,22 +212,29 @@ class GitHelper:
             return
         
         # Create and checkout new branch
-        self._print_info(f"Creating branch: {branch_name}")
+        self._print_info(f"Creating and switching to branch: {branch_name}")
         result = self._run_command(['git', 'checkout', '-b', branch_name])
         
         if result.returncode == 0:
-            self._print_success(f"Created and switched to branch: {branch_name}")
+            # Confirm current branch
+            current_branch = self.get_current_branch()
+            self._print_success(f"✅ Created and switched to branch: {branch_name}")
             
             # Push branch to remote
-            self._print_info("Pushing branch to remote...")
+            self._print_info("🚀 Pushing branch to remote...")
             push_result = self._run_command(['git', 'push', '-u', 'origin', branch_name])
             
             if push_result.returncode == 0:
-                self._print_success("Branch pushed to remote successfully")
+                self._print_success("🌐 Branch pushed to remote successfully")
             else:
-                self._print_warning("Branch created locally but failed to push to remote")
+                self._print_warning("⚠️  Branch created locally but failed to push to remote")
+                self._print_info("💡 You can push later with: git push -u origin " + branch_name)
+            
+            # Show detailed status
+            self._show_branch_status(current_branch)
         else:
-            self._print_error(f"Failed to create branch: {branch_name}")
+            self._print_error(f"❌ Failed to create branch: {branch_name}")
+            # Stay on original branch if creation failed
     
     def commit_push(self, message: str, files: Optional[List[str]] = None):
         """Commit changes and push to current branch"""
@@ -460,7 +509,9 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python git_helper.py create-branch --type feature --jira PROJ-123 --description "add-new-feature"
+  python git_helper.py create-branch --type feature --issue 123 --description "add-new-feature"
+  python git_helper.py create-branch --type feature --description "test branch for demo"
+  python git_helper.py create-branch --type bugfix --branch-name "custom-branch-name"
   python git_helper.py commit-push --message "Implement new feature"
   python git_helper.py check-status
   python git_helper.py create-pr --title "Add new feature"
@@ -474,8 +525,13 @@ Examples:
     create_parser = subparsers.add_parser('create-branch', help='Create a new feature/bugfix branch')
     create_parser.add_argument('--type', choices=['feature', 'bugfix', 'hotfix'], required=True,
                               help='Type of branch to create')
-    create_parser.add_argument('--jira', required=True, help='JIRA ticket number')
-    create_parser.add_argument('--description', required=True, help='Brief description')
+    
+    # Either issue + description OR custom branch name OR just description
+    group = create_parser.add_mutually_exclusive_group(required=False)
+    group.add_argument('--branch-name', help='Custom branch name (overrides default naming scheme)')
+    
+    create_parser.add_argument('--issue', help='Issue/ticket number (optional)')
+    create_parser.add_argument('--description', help='Brief description (required when not using --branch-name)')
     
     # Commit and push command
     commit_parser = subparsers.add_parser('commit-push', help='Commit and push changes')
@@ -512,7 +568,11 @@ Examples:
         git_helper = GitHelper()
         
         if args.command == 'create-branch':
-            git_helper.create_branch(args.type, args.jira, args.description)
+            # Validate arguments for create-branch
+            if not args.branch_name and not args.issue and not args.description:
+                print(f"{Colors.RED}❌ Error: When not using --branch-name, you must provide either --issue, --description, or both{Colors.END}")
+                return
+            git_helper.create_branch(args.type, args.issue, args.description, args.branch_name)
         elif args.command == 'commit-push':
             git_helper.commit_push(args.message, args.files)
         elif args.command == 'check-status':

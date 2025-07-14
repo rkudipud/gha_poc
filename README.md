@@ -49,7 +49,7 @@ python devops/release_automation/setup.py
 python devops/consistency_checker/checker.py
 
 # 3. Create feature branch and make changes
-python devops/release_automation/git_helper.py create-branch --type feature --issue 123
+python devops/release_automation/git_helper.py create-branch --type feature --description "new-feature"
 # ... make your changes ...
 
 # 4. Commit and push (triggers CI/CD automatically)
@@ -147,11 +147,19 @@ python devops/consistency_checker/checker.py --skip python_imports
 Streamlined Git workflow automation:
 
 ```bash
-# Create feature branch with proper naming
+# Create feature branch with automatic naming (default scheme)
 python devops/release_automation/git_helper.py create-branch --type feature --issue 123 --description "add-new-feature"
 
-# Create other branch types
-python devops/release_automation/git_helper.py create-branch --type bugfix --issue 456
+# Create branch with just description (generates random ID) 
+python devops/release_automation/git_helper.py create-branch --type feature --description "test branch for demo"
+
+# Create branch with custom name (bypasses default naming)
+python devops/release_automation/git_helper.py create-branch --type feature --branch-name "my-custom-branch"
+
+# All commands automatically switch you to the new branch and show status
+
+# Create other branch types with automatic naming
+python devops/release_automation/git_helper.py create-branch --type bugfix --issue 456 --description "fix-critical-bug"
 python devops/release_automation/git_helper.py create-branch --type hotfix --issue 789
 
 # Commit and push changes
@@ -165,6 +173,65 @@ python devops/release_automation/git_helper.py --check-config
 
 # Reset configuration to defaults
 python devops/release_automation/git_helper.py --reset-config
+```
+
+#### Branch Naming Convention
+
+The Git Helper uses an intelligent branch naming scheme that you can either follow automatically or override:
+
+**Default Naming Patterns:**
+- **Feature branches**: `feature/GH-{issue}-{description}` (with issue) or `feature/{description}-{randomID}` (description only)
+  - Example: `feature/GH-123-add-user-authentication` or `feature/test-branch-for-demo-1234567`
+- **Bugfix branches**: `bugfix/GH-{issue}-{description}` (with issue) or `bugfix/{description}-{randomID}` (description only)
+  - Example: `bugfix/GH-456-fix-login-validation` or `bugfix/critical-security-fix-9876543`
+- **Hotfix branches**: `hotfix/GH-{issue}-{description}` (with issue) or `hotfix/{description}-{randomID}` (description only)
+  - Example: `hotfix/GH-789-critical-security-patch` or `hotfix/urgent-database-fix-5432109`
+
+**Branch Naming Rules:**
+1. **Issue numbers** are automatically prefixed with `GH-` (GitHub Issues) if not already prefixed
+2. **Random IDs** are generated when no issue is provided (combines random number + timestamp)
+3. **Descriptions** are automatically sanitized:
+   - Converted to lowercase
+   - Spaces and underscores converted to hyphens
+   - Special characters removed
+4. **Custom naming** bypasses all automatic formatting
+
+**Configuration:**
+The branch naming patterns are configurable in `.git_helper_config.json`:
+```json
+{
+  "branch_naming": {
+    "feature": "feature/{issue}-{description}",
+    "bugfix": "bugfix/{issue}-{description}", 
+    "hotfix": "hotfix/{issue}-{description}"
+  },
+  "issue_tracking": {
+    "use_github_issues": true,
+    "issue_prefix": "GH"
+  }
+}
+```
+
+**Flexibility Options:**
+- Use `--issue` and `--description` for automatic naming following your team's conventions
+- Use `--description` only for ad-hoc branches with random IDs (great for experimental work)
+- Use `--branch-name` when you need complete control over the branch name
+- Issue and description are both optional when using `--branch-name`
+- Issue prefix (`GH-`) is automatically added if not present
+
+**Complete Examples:**
+```bash
+# Creates: feature/GH-123-add-new-feature (with issue)
+python devops/release_automation/git_helper.py create-branch --type feature --issue 123 --description "add new feature"
+
+# Creates: feature/test-branch-for-demo-8521473 (description only, random ID)
+python devops/release_automation/git_helper.py create-branch --type feature --description "test branch for demo"
+
+# Creates: bugfix/GH-456-task (issue only, description defaults to "task")
+python devops/release_automation/git_helper.py create-branch --type bugfix --issue 456
+
+# Creates: exactly "my-special-branch-name" (bypasses all conventions)
+python devops/release_automation/git_helper.py create-branch --type feature --branch-name "my-special-branch-name"
 ```
 
 ### Setup and Configuration Tools
@@ -362,7 +429,7 @@ ls -la .git_helper_config.json
    python devops/consistency_checker/checker.py
    
    # Create feature branch
-   python devops/release_automation/git_helper.py create-branch --type feature --issue 123
+   python devops/release_automation/git_helper.py create-branch --type feature --description "new-feature"
    ```
 
 3. **During Development**
