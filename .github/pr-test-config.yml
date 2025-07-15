@@ -116,11 +116,7 @@ test_suite:
     timeout_minutes: 10
     inputs:
       changed-only: true
-      enable-waivers: true
-      linters: "flake8,pylint"
-      fail-on-warnings: false
     outputs_required:
-      - score
       - lint-result
     score_mapping:
       # Maps action output to 0-100 score
@@ -398,35 +394,6 @@ custom_actions:
   # Documentation
   docs_validation: ".github/actions/docs-validation"
   api_docs_check: ".github/actions/api-docs-check"
-
-# ==============================================================================
-# Waiver System Configuration
-# ==============================================================================
-# Allow temporary exceptions for specific issues
-waivers:
-  enabled: true
-  max_duration_days: 30
-  approval_required: true
-  approval_teams: ["senior-developers", "tech-leads"]
-  
-  # Waiver file location
-  waiver_file: "devops/consistency_checker/waivers.yml"
-  
-  # Automatic waiver expiry warnings
-  expiry_warning_days: 7
-  notification_recipients: ["devops-team@company.com"]
-  
-  # Waiver categories
-  categories:
-    - name: "technical_debt"
-      max_duration_days: 60
-      requires_issue: true
-    - name: "external_dependency"
-      max_duration_days: 90
-      requires_justification: true
-    - name: "performance_exception"
-      max_duration_days: 14
-      requires_benchmarks: true
 
 # ==============================================================================
 # Reporting Configuration

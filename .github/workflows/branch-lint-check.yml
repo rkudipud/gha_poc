@@ -123,7 +123,7 @@ jobs:
 
       # -------------------------------------------------------------------------
       # Step 5: Run Python Linting using the composite action.
-      #         Executes the linting action with waiver support.
+      #         Executes the linting action with simple flake8 checking.
       # -------------------------------------------------------------------------
       - name: Run Python Linting
         id: linting
@@ -132,11 +132,8 @@ jobs:
         with:
           changed-only: ${{ steps.lint_mode.outputs.changed_only }}
           python-version: '3.11.1'
-          enable-waivers: 'true'
-          linters: 'flake8'
-          fail-on-warnings: 'false'
         continue-on-error: true
-        # [5] Invokes the lint action with waiver support and detailed reporting.
+        # [5] Invokes the lint action with simple flake8 linting.
 
       # -------------------------------------------------------------------------
       # Step 6: Skip Python Linting.
