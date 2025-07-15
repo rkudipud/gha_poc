@@ -24,6 +24,7 @@ permissions:
   contents: read
   pull-requests: write
   issues: read
+  statuses: write
 
 jobs:
   validate_pr:
@@ -117,9 +118,9 @@ jobs:
           echo "✅ Basic quality checks passed"
 
       # -------------------------------------------------------------------------
-      # Step 4: Update PR status
+      # Step 4: Update PR status and auto-approve if successful
       # -------------------------------------------------------------------------
-      - name: Update PR status
+      - name: Update PR status and auto-approve
         if: always()
         uses: actions/github-script@v6
         with:
@@ -128,10 +129,9 @@ jobs:
             const issuesResult = '${{ steps.check-issues.outcome }}';
             const qualityResult = '${{ job.status }}';
             
-            let status, message, description;
+            let message, description;
             
             if (issuesResult === 'success' && qualityResult === 'success') {
-              status = 'success';
               message = '✅ PR Validation Passed';
               description = 'No open lint issues and quality checks passed';
               
@@ -140,133 +140,37 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.issue.number,
-                body: `✅ **PR Validation Passed**\n\n- ✅ No open lint issues on source branch\n- ✅ Basic quality checks passed\n\nThis PR is ready for review and merge.`
+                body: `✅ **PR Validation Passed**\n\n- ✅ No open lint issues on source branch\n- ✅ Basic quality checks passed\n\n🎉 **Auto-approving this PR** - ready for merge!`
               });
+              
+              // Auto-approve the PR
+              try {
+                await github.rest.pulls.createReview({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: context.issue.number,
+                  event: 'APPROVE',
+                  body: '🤖 **Automated Approval**\n\nThis PR has passed all validation checks:\n- ✅ No open lint issues\n- ✅ Basic quality checks passed\n\nApproved automatically by the PR validation workflow.'
+                });
+                console.log('✅ PR automatically approved');
+              } catch (error) {
+                console.log('⚠️ Could not auto-approve PR:', error.message);
+                // Continue without failing the workflow
+              }
             } else {
-              status = 'failure';
               message = '❌ PR Validation Failed';
               description = 'Open lint issues or quality checks failed';
+              
+              // Add failure comment (no auto-approval)
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `❌ **PR Validation Failed**\n\nPlease fix the issues before this PR can be approved and merged.`
+              });
             }
             
-            // Update commit status
-            await github.rest.repos.createCommitStatus({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              sha: context.payload.pull_request.head.sha,
-              state: status,
-              context: 'Simple PR Validation',
-              description: description
-            });
-            
             console.log(`${message}: ${description}`);
-            ---
-            
-            <details>
-            <summary>🔧 Configuration Details</summary>
-            
-            **Thresholds:**
-            - Auto-merge: ≥85%
-            - Manual review: ≥65%
-            - Block merge: <65%
-            
-            **Weight Distribution:**
-            - Code Quality: 25%
-            - Security: 20%
-            - Testing: 25%
-            - Documentation: 15%
-            - Compliance: 15%
-            
-            **Validation Time:** $(date -u)
-            **Workflow:** Modular PR Validation v2.1.0
-            </details>
-            
-            *This is an automated assessment. For questions about specific checks, consult the [PR validation documentation](devops/docs/pr-validation.md).*
-            `;
-            
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: ${{ env.pr_number }},
-              body: comment
-            });
-            
-            console.log('✅ PR status updated successfully with comprehensive feedback');
-
-  # ==============================================================================
-  # Auto-Merge Execution
-  # ==============================================================================
-  auto_merge:
-    name: Execute Auto-Merge
-    runs-on: ubuntu-latest
-    needs: [make_decision]
-    if: needs.make_decision.outputs.decision == 'auto_merge'
-    timeout-minutes: 5
-    steps:
-      - name: Enable auto-merge
-        uses: actions/github-script@v6
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            await github.rest.pulls.enableAutoMerge({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: ${{ env.pr_number }},
-              merge_method: 'squash'
-            });
-            
-            console.log('✅ Auto-merge enabled for PR #${{ env.pr_number }}');
-
-  # ==============================================================================
-  # Notification and Cleanup
-  # ==============================================================================
-  notify:
-    name: Send Notifications
-    runs-on: ubuntu-latest
-    needs: [make_decision]
-    if: always() && needs.make_decision.result != 'skipped'
-    steps:
-      - name: Send notification
-        run: |
-          # Send notifications based on PR validation results
-          decision="${{ needs.make_decision.outputs.decision }}"
-          score="${{ needs.make_decision.outputs.final_score }}"
-          pr_url="${{ github.event.pull_request.html_url }}"
-          
-          echo "📧 Preparing notifications for PR #${{ env.pr_number }}"
-          echo "   Decision: $decision"
-          echo "   Score: $score%"
-          echo "   URL: $pr_url"
-          
-          # Determine notification urgency
-          case "$decision" in
-            "auto_merge")
-              urgency="info"
-              message="✅ PR #${{ env.pr_number }} approved for auto-merge (Score: $score%)"
-              ;;
-            "manual_review")
-              urgency="warning"
-              message="⚠️ PR #${{ env.pr_number }} requires manual review (Score: $score%)"
-              ;;
-            "blocked")
-              urgency="error"
-              message="❌ PR #${{ env.pr_number }} blocked by validation (Score: $score%)"
-              ;;
-          esac
-          
-          echo "📤 Notification: [$urgency] $message"
-          
-          # Here you would integrate with your notification system:
-          # - Email via SendGrid/AWS SES
-          # - Slack via webhook
-          # - Microsoft Teams
-          # - PagerDuty for critical issues
-          
-          # Example commands (uncomment and configure as needed):
-          # curl -X POST "$SLACK_WEBHOOK" -d "{\"text\":\"$message\"}"
-          # aws ses send-email --to team@company.com --subject "PR Validation" --text "$message"
-          
-          echo "✅ Notification prepared (configure endpoints to enable actual sending)"
-        continue-on-error: true
 
 # ==============================================================================
 # Workflow Helper Functions and Utilities
