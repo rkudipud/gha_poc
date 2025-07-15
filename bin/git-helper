@@ -1,6 +1,6 @@
 #!/bin/sh
 # Git Helper wrapper script
-# Created: 2025-07-15 01:50:31
+# Created: 2025-07-15 08:40:51
 
 REPO_ROOT="/nfs/site/disks/ddi_r2g_14/rkudipud/gha_poc"
 HELPER_SCRIPT="$REPO_ROOT/devops/release_automation/git_helper.py"
