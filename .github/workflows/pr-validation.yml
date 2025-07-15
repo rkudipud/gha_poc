@@ -1,11 +1,11 @@
 # ==============================================================================
-# Simple Pull Request Validation
+# Simple Pull Request Validation with Auto-Merge
 # ==============================================================================
 # Description:
 # This workflow validates PRs by ensuring:
 # 1. The source branch has no open lint issues
 # 2. Basic quality checks pass
-# 3. Auto-approves merge if all checks pass
+# 3. Auto-merges if all checks pass
 #
 # ==============================================================================
 
@@ -21,16 +21,19 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
   issues: read
-  statuses: write
+  checks: write
 
 jobs:
   validate_pr:
     name: Validate Pull Request
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      validation_passed: ${{ steps.validation-result.outputs.passed }}
+      can_auto_merge: ${{ steps.validation-result.outputs.can_auto_merge }}
     steps:
       # -------------------------------------------------------------------------
       # Step 1: Checkout repository
@@ -68,7 +71,7 @@ jobs:
             
             if (openIssues.length > 0) {
               console.log(`❌ Found ${openIssues.length} open lint issue(s) on branch ${branchName}`);
-              core.setFailed(`Branch ${branchName} has ${openIssues.length} open lint issue(s). Please fix them before merging.`);
+              core.setOutput('has_issues', 'true');
               
               // Create a comment with issue details
               const issueLinks = openIssues.map(issue => `#${issue.number}`).join(', ');
@@ -82,6 +85,7 @@ jobs:
               return false;
             } else {
               console.log(`✅ No open lint issues found on branch ${branchName}`);
+              core.setOutput('has_issues', 'false');
               return true;
             }
 
@@ -89,7 +93,8 @@ jobs:
       # Step 3: Basic quality check
       # -------------------------------------------------------------------------
       - name: Basic quality check
-        if: steps.check-issues.outcome == 'success'
+        id: quality-check
+        if: steps.check-issues.outputs.has_issues == 'false'
         run: |
           echo "🔍 Running basic quality checks..."
           
@@ -105,6 +110,7 @@ jobs:
                 python -m py_compile "$file"
                 if [ $? -ne 0 ]; then
                   echo "❌ Syntax error in $file"
+                  echo "quality_passed=false" >> $GITHUB_OUTPUT
                   exit 1
                 fi
               fi
@@ -116,9 +122,30 @@ jobs:
           fi
           
           echo "✅ Basic quality checks passed"
+          echo "quality_passed=true" >> $GITHUB_OUTPUT
 
       # -------------------------------------------------------------------------
-      # Step 4: Update PR status and auto-approve if successful
+      # Step 4: Determine validation result
+      # -------------------------------------------------------------------------
+      - name: Determine validation result
+        id: validation-result
+        if: always()
+        run: |
+          ISSUES_CHECK="${{ steps.check-issues.outputs.has_issues }}"
+          QUALITY_CHECK="${{ steps.quality-check.outputs.quality_passed }}"
+          
+          if [ "$ISSUES_CHECK" == "false" ] && [ "$QUALITY_CHECK" == "true" ]; then
+            echo "passed=true" >> $GITHUB_OUTPUT
+            echo "can_auto_merge=true" >> $GITHUB_OUTPUT
+            echo "✅ All validation checks passed - PR ready for auto-merge"
+          else
+            echo "passed=false" >> $GITHUB_OUTPUT
+            echo "can_auto_merge=false" >> $GITHUB_OUTPUT
+            echo "❌ Validation failed - manual review required"
+          fi
+
+      # -------------------------------------------------------------------------
+      # Step 5: Update PR status and comment
       # -------------------------------------------------------------------------
       - name: Update PR status and auto-approve
         if: always()
@@ -126,51 +153,169 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const issuesResult = '${{ steps.check-issues.outcome }}';
-            const qualityResult = '${{ job.status }}';
+            const validationPassed = '${{ steps.validation-result.outputs.passed }}' === 'true';
+            const canAutoMerge = '${{ steps.validation-result.outputs.can_auto_merge }}' === 'true';
             
-            let message, description;
+            let status, message, description, commentBody;
             
-            if (issuesResult === 'success' && qualityResult === 'success') {
+            if (validationPassed && canAutoMerge) {
+              status = 'success';
               message = '✅ PR Validation Passed';
-              description = 'No open lint issues and quality checks passed';
-              
-              // Add success comment
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: `✅ **PR Validation Passed**\n\n- ✅ No open lint issues on source branch\n- ✅ Basic quality checks passed\n\n🎉 **Auto-approving this PR** - ready for merge!`
-              });
-              
-              // Auto-approve the PR
-              try {
-                await github.rest.pulls.createReview({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: context.issue.number,
-                  event: 'APPROVE',
-                  body: '🤖 **Automated Approval**\n\nThis PR has passed all validation checks:\n- ✅ No open lint issues\n- ✅ Basic quality checks passed\n\nApproved automatically by the PR validation workflow.'
-                });
-                console.log('✅ PR automatically approved');
-              } catch (error) {
-                console.log('⚠️ Could not auto-approve PR:', error.message);
-                // Continue without failing the workflow
-              }
+              description = 'No open lint issues and quality checks passed - Ready for auto-merge';
+              commentBody = `✅ **PR Validation Passed**\n\n- ✅ No open lint issues on source branch\n- ✅ Basic quality checks passed\n\n🚀 **Auto-merge will be initiated shortly.**`;
             } else {
               message = '❌ PR Validation Failed';
               description = 'Open lint issues or quality checks failed';
-              
-              // Add failure comment (no auto-approval)
+              commentBody = `❌ **PR Validation Failed**\n\nPlease fix the issues and push new commits to trigger re-validation.`;
+            }
+            
+            // Update commit status
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.payload.pull_request.head.sha,
+              state: status,
+              context: 'Simple PR Validation',
+              description: description
+            });
+            
+            // Add comment only if validation passed (failure comments are added earlier)
+            if (validationPassed) {
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.issue.number,
-                body: `❌ **PR Validation Failed**\n\nPlease fix the issues before this PR can be approved and merged.`
+                body: commentBody
               });
             }
             
             console.log(`${message}: ${description}`);
+
+  # ==============================================================================
+  # Auto-Merge Execution
+  # ==============================================================================
+  auto_merge:
+    name: Execute Auto-Merge
+    runs-on: ubuntu-latest
+    needs: [validate_pr]
+    if: needs.validate_pr.outputs.can_auto_merge == 'true'
+    timeout-minutes: 5
+    steps:
+      - name: Enable auto-merge
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            
+            console.log(`🚀 Enabling auto-merge for PR #${prNumber}`);
+            
+            try {
+              // Enable auto-merge with squash method
+              await github.rest.pulls.enableAutoMerge({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+                merge_method: 'squash'
+              });
+              
+              console.log(`✅ Auto-merge enabled for PR #${prNumber}`);
+              
+              // Add a comment to notify about auto-merge
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: `🚀 **Auto-merge enabled!**\n\nThis PR will be automatically merged once all required status checks pass.\n\n**Merge method:** Squash and merge\n**Triggered by:** Successful validation (no open lint issues + quality checks passed)`
+              });
+              
+            } catch (error) {
+              console.error('❌ Failed to enable auto-merge:', error.message);
+              
+              // Fallback: Try to merge directly if auto-merge is not available
+              if (error.message.includes('auto-merge is not enabled')) {
+                console.log('🔄 Auto-merge not enabled on repo, attempting direct merge...');
+                
+                try {
+                  await github.rest.pulls.merge({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    pull_number: prNumber,
+                    merge_method: 'squash',
+                    commit_title: `Merge PR #${prNumber}: ${{ github.event.pull_request.title }}`,
+                    commit_message: 'Auto-merged by GitHub Actions after successful validation'
+                  });
+                  
+                  console.log(`✅ PR #${prNumber} merged successfully`);
+                  
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: prNumber,
+                    body: `✅ **PR Merged Successfully!**\n\nThis PR was automatically merged after passing all validation checks.\n\n**Merge method:** Squash and merge`
+                  });
+                  
+                } catch (mergeError) {
+                  console.error('❌ Direct merge also failed:', mergeError.message);
+                  core.setFailed(`Failed to auto-merge PR: ${mergeError.message}`);
+                }
+              } else {
+                core.setFailed(`Failed to enable auto-merge: ${error.message}`);
+              }
+            }
+
+  # ==============================================================================
+  # Notification (Optional)
+  # ==============================================================================
+  notify:
+    name: Send Notifications
+    runs-on: ubuntu-latest
+    needs: [validate_pr, auto_merge]
+    if: always() && needs.validate_pr.result != 'skipped'
+    steps:
+      - name: Send notification
+        run: |
+          # Send notifications based on PR validation results
+          validation_passed="${{ needs.validate_pr.outputs.validation_passed }}"
+          can_auto_merge="${{ needs.validate_pr.outputs.can_auto_merge }}"
+          auto_merge_result="${{ needs.auto_merge.result }}"
+          pr_url="${{ github.event.pull_request.html_url }}"
+          pr_number="${{ github.event.pull_request.number }}"
+          
+          echo "📧 Preparing notifications for PR #${pr_number}"
+          echo "   Validation passed: $validation_passed"
+          echo "   Can auto-merge: $can_auto_merge"
+          echo "   Auto-merge result: $auto_merge_result"
+          echo "   URL: $pr_url"
+          
+          # Determine notification message
+          if [ "$validation_passed" == "true" ] && [ "$can_auto_merge" == "true" ]; then
+            if [ "$auto_merge_result" == "success" ]; then
+              urgency="info"
+              message="✅ PR #${pr_number} successfully auto-merged"
+            else
+              urgency="warning" 
+              message="⚠️ PR #${pr_number} validated but auto-merge failed"
+            fi
+          else
+            urgency="error"
+            message="❌ PR #${pr_number} failed validation"
+          fi
+          
+          echo "📤 Notification: [$urgency] $message"
+          
+          # Here you would integrate with your notification system:
+          # - Email via SendGrid/AWS SES
+          # - Slack via webhook
+          # - Microsoft Teams
+          # - PagerDuty for critical issues
+          
+          # Example commands (uncomment and configure as needed):
+          # curl -X POST "$SLACK_WEBHOOK" -d "{\"text\":\"$message\"}"
+          # aws ses send-email --to team@company.com --subject "PR Validation" --text "$message"
+          
+          echo "✅ Notification prepared (configure endpoints to enable actual sending)"
+        continue-on-error: true
 
 # ==============================================================================
 # Workflow Helper Functions and Utilities
