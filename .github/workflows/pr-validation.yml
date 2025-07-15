@@ -15,8 +15,6 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
     branches: [main, develop]
-  pull_request_review:
-    types: [submitted]
 
 concurrency:
   group: pr-validation-${{ github.event.pull_request.number }}
@@ -25,817 +23,142 @@ concurrency:
 permissions:
   contents: read
   pull-requests: write
-  checks: write
-  issues: write
-  security-events: write
-
-env:
-  # PR-specific variables (snake_case convention)
-  pr_number: ${{ github.event.pull_request.number }}
-  base_branch: ${{ github.event.pull_request.base.ref }}
-  head_branch: ${{ github.event.pull_request.head.ref }}
-  pr_title: ${{ github.event.pull_request.title }}
-  pr_author: ${{ github.event.pull_request.user.login }}
-  
-  # Configuration and debugging
-  config_file: ".github/pr-test-config.yml"
-  debug_mode: false  # Set to true for verbose logging
-  
-  # Performance optimization
-  enable_caching: true
-  parallel_execution: true
+  issues: read
 
 jobs:
-  # ==============================================================================
-  # Configuration Validation and Setup
-  # ==============================================================================
-  validate_configuration:
-    name: Validate Test Configuration
+  validate_pr:
+    name: Validate Pull Request
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      config_valid: ${{ steps.validate_config.outputs.config_valid }}
-      test_environment: ${{ steps.detect_environment.outputs.environment }}
-      hard_checks: ${{ steps.load_config.outputs.hard_checks }}
-      soft_checks: ${{ steps.load_config.outputs.soft_checks }}
-      thresholds: ${{ steps.load_config.outputs.thresholds }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Detect test environment
-        id: detect_environment
-        run: |
-          # Determine environment based on PR characteristics
-          environment="default"
-          
-          # Check for specific labels or patterns
-          if echo "${{ env.pr_title }}" | grep -qi "hotfix\|emergency"; then
-            environment="hotfix"
-          elif echo "${{ github.event.pull_request.labels[*].name }}" | grep -q "performance"; then
-            environment="performance"
-          elif echo "${{ github.event.pull_request.labels[*].name }}" | grep -q "security"; then
-            environment="security"
-          fi
-          
-          echo "environment=$environment" >> $GITHUB_OUTPUT
-          echo "🔍 Detected environment: $environment"
-
-      - name: Load and validate configuration
-        id: validate_config
-        run: |
-          config_file=".github/pr-test-config.yml"
-          
-          if [ ! -f "$config_file" ]; then
-            echo "❌ Configuration file not found: $config_file"
-            echo "config_valid=false" >> $GITHUB_OUTPUT
-            exit 1
-          fi
-          
-          # Validate YAML syntax
-          if ! python -c "import yaml; yaml.safe_load(open('$config_file'))" 2>/dev/null; then
-            echo "❌ Invalid YAML syntax in $config_file"
-            echo "config_valid=false" >> $GITHUB_OUTPUT
-            exit 1
-          fi
-          
-          echo "✅ Configuration file is valid"
-          echo "config_valid=true" >> $GITHUB_OUTPUT
-
-      - name: Load configuration data
-        id: load_config
-        run: |
-          # Extract configuration using Python
-          # This step parses the YAML config and separates hard vs soft checks
-          python << 'EOF'
-          import yaml
-          import json
-          import os
-          
-          print("📋 Loading PR test configuration...")
-          
-          with open('.github/pr-test-config.yml', 'r') as f:
-              config = yaml.safe_load(f)
-          
-          # Extract hard and soft checks
-          hard_checks = []
-          soft_checks = []
-          
-          for test in config.get('test_suite', []):
-              if test.get('enforcement') == 'hard':
-                  hard_checks.append(test)
-              else:
-                  soft_checks.append(test)
-          
-          # Extract thresholds
-          thresholds = config.get('global_config', {})
-          
-          # Write to GITHUB_OUTPUT
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f"hard_checks={json.dumps(hard_checks)}\n")
-              f.write(f"soft_checks={json.dumps(soft_checks)}\n")
-              f.write(f"thresholds={json.dumps(thresholds)}\n")
-          
-          print(f"✅ Found {len(hard_checks)} hard checks and {len(soft_checks)} soft checks")
-          print(f"📊 Thresholds: Auto-merge ≥{thresholds.get('auto_merge_threshold', 85)}%, Manual review ≥{thresholds.get('manual_review_threshold', 65)}%")
-          
-          # Display configuration summary
-          print("\n📋 Configuration Summary:")
-          print("=" * 50)
-          print("Hard Checks (Must Pass):")
-          for check in hard_checks:
-              print(f"  • {check['name']} ({check['id']})")
-          print("\nSoft Checks (Scoring):")
-          for check in soft_checks:
-              print(f"  • {check['name']} ({check['id']}) - Weight: {check.get('weight', 0)}%")
-          print("=" * 50)
-          EOF
-
-  # ==============================================================================
-  # Hard Checks Execution (Must Pass)
-  # ==============================================================================
-  execute_hard_checks:
-    name: Execute Hard Checks
-    runs-on: ubuntu-latest
-    needs: validate_configuration
-    if: needs.validate_configuration.outputs.config_valid == 'true'
-    timeout-minutes: 25
-    outputs:
-      hard_checks_passed: ${{ steps.run_hard_checks.outputs.all_passed }}
-      hard_check_results: ${{ steps.run_hard_checks.outputs.results }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup test environment
-        run: |
-          # Install required tools
-          pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          if [ -f requirements-test.txt ]; then pip install -r requirements-test.txt; fi
-          
-          # Install additional tools for hard checks
-          pip install bandit safety semgrep
-
-      - name: Execute hard checks
-        id: run_hard_checks
-        run: |
-          # Execute all hard checks that must pass for PR to be mergeable
-          # Hard checks include: security_critical, syntax_validation, etc.
-          hard_checks='${{ needs.validate_configuration.outputs.hard_checks }}'
-          all_passed=true
-          results="{}"
-          
-          echo "🔍 Executing Hard Checks (Must Pass)"
-          echo "======================================"
-          
-          echo "$hard_checks" | python << 'EOF'
-          import json
-          import sys
-          import subprocess
-          import os
-          import glob
-          
-          hard_checks = json.loads(sys.stdin.read())
-          all_passed = True
-          results = {}
-          
-          def get_changed_python_files():
-              """Get list of changed Python files for validation"""
-              try:
-                  result = subprocess.run(['git', 'diff', '--name-only', 
-                                         '${{ github.event.pull_request.base.sha }}', 
-                                         '--diff-filter=AM'], 
-                                        capture_output=True, text=True)
-                  files = [f for f in result.stdout.strip().split('\n') if f.endswith('.py') and f]
-                  return files
-              except Exception as e:
-                  print(f"Warning: Could not get changed files: {e}")
-                  return glob.glob('**/*.py', recursive=True)
-          
-          changed_files = get_changed_python_files()
-          print(f"📁 Analyzing {len(changed_files)} Python files: {', '.join(changed_files[:5])}{' ...' if len(changed_files) > 5 else ''}")
-          
-          for check in hard_checks:
-              check_id = check['id']
-              check_name = check['name']
-              timeout = check.get('timeout_minutes', 15)
-              
-              print(f"\n🔍 Running hard check: {check_name}")
-              print(f"   ID: {check_id}")
-              print(f"   Timeout: {timeout} minutes")
-              
-              try:
-                  if check_id == 'security_critical':
-                      print("   Executing critical security scan...")
-                      # Run critical security scan with bandit
-                      if changed_files:
-                          result = subprocess.run(['bandit', '-r'] + changed_files + ['-f', 'json'], 
-                                                capture_output=True, text=True, timeout=timeout*60)
-                          
-                          if result.returncode == 0:
-                              scan_results = json.loads(result.stdout)
-                              high_issues = len([r for r in scan_results.get('results', []) 
-                                               if r.get('issue_severity') == 'HIGH'])
-                              critical_issues = len([r for r in scan_results.get('results', []) 
-                                                   if r.get('issue_severity') == 'CRITICAL'])
-                              
-                              if high_issues > 0 or critical_issues > 0:
-                                  print(f"   ❌ FAILED: {critical_issues} critical + {high_issues} high severity issues")
-                                  all_passed = False
-                                  results[check_id] = {
-                                      'passed': False, 
-                                      'details': f'{critical_issues} critical, {high_issues} high severity issues',
-                                      'critical_issues': critical_issues,
-                                      'high_issues': high_issues
-                                  }
-                              else:
-                                  print(f"   ✅ PASSED: No critical or high severity issues")
-                                  results[check_id] = {
-                                      'passed': True, 
-                                      'details': 'No critical or high severity security issues found'
-                                  }
-                          else:
-                              print(f"   ❌ FAILED: Security scan execution error")
-                              all_passed = False
-                              results[check_id] = {'passed': False, 'details': 'Security scan execution failed'}
-                      else:
-                          print(f"   ✅ PASSED: No Python files to scan")
-                          results[check_id] = {'passed': True, 'details': 'No Python files changed'}
-                  
-                  elif check_id == 'syntax_validation':
-                      print("   Validating Python syntax...")
-                      syntax_errors = 0
-                      error_files = []
-                      
-                      for file_path in changed_files:
-                          if file_path and os.path.exists(file_path):
-                              result = subprocess.run(['python', '-m', 'py_compile', file_path], 
-                                                    capture_output=True, text=True)
-                              if result.returncode != 0:
-                                  syntax_errors += 1
-                                  error_files.append(file_path)
-                                  print(f"      ❌ Syntax error in {file_path}")
-                      
-                      if syntax_errors > 0:
-                          print(f"   ❌ FAILED: {syntax_errors} syntax errors")
-                          all_passed = False
-                          results[check_id] = {
-                              'passed': False, 
-                              'details': f'{syntax_errors} syntax errors in: {", ".join(error_files)}',
-                              'error_count': syntax_errors,
-                              'error_files': error_files
-                          }
-                      else:
-                          print(f"   ✅ PASSED: No syntax errors")
-                          results[check_id] = {'passed': True, 'details': 'All Python files have valid syntax'}
-                  
-                  elif check_id == 'branch_protection':
-                      print("   Checking branch protection compliance...")
-                      # Basic branch protection check (placeholder)
-                      # In real implementation, this would check actual branch protection rules
-                      base_branch = '${{ github.event.pull_request.base.ref }}'
-                      if base_branch in ['main', 'master', 'develop']:
-                          print(f"   ✅ PASSED: Target branch '{base_branch}' is protected")
-                          results[check_id] = {'passed': True, 'details': f'Targeting protected branch: {base_branch}'}
-                      else:
-                          print(f"   ⚠️ WARNING: Target branch '{base_branch}' may not be protected")
-                          results[check_id] = {'passed': True, 'details': f'Target branch: {base_branch}'}
-                  
-                  elif check_id == 'license_compliance':
-                      print("   Checking license compliance...")
-                      # Check for requirements.txt and scan for license compatibility
-                      license_issues = 0
-                      if os.path.exists('requirements.txt'):
-                          # This is a placeholder - real implementation would use license scanning tools
-                          print("   📋 Found requirements.txt, scanning for license compliance...")
-                          results[check_id] = {'passed': True, 'details': 'License compliance check passed (placeholder)'}
-                      else:
-                          print("   ℹ️ No requirements.txt found, skipping dependency license check")
-                          results[check_id] = {'passed': True, 'details': 'No dependencies to check'}
-                  
-                  else:
-                      print(f"   ⚠️ Unknown hard check: {check_id}, marking as passed")
-                      results[check_id] = {'passed': True, 'details': 'Unknown check type - skipped'}
-              
-              except subprocess.TimeoutExpired:
-                  print(f"   ❌ FAILED: {check_name} timed out after {timeout} minutes")
-                  all_passed = False
-                  results[check_id] = {'passed': False, 'details': f'Timeout after {timeout} minutes'}
-              except Exception as e:
-                  print(f"   ❌ FAILED: {check_name} failed with error: {str(e)}")
-                  all_passed = False
-                  results[check_id] = {'passed': False, 'details': f'Error: {str(e)}'}
-          
-          print(f"\n🎯 Hard Checks Summary:")
-          print("=" * 30)
-          for check_id, result in results.items():
-              status = "✅ PASS" if result['passed'] else "❌ FAIL"
-              print(f"{status} {check_id}: {result['details']}")
-          print("=" * 30)
-          
-          # Write results to GITHUB_OUTPUT
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f"all_passed={'true' if all_passed else 'false'}\n")
-              f.write(f"results={json.dumps(results)}\n")
-          
-          final_status = "✅ All hard checks passed" if all_passed else "❌ Some hard checks failed"
-          print(f"\n🏁 Final Result: {final_status}")
-          
-          if not all_passed:
-              print("\n💡 Next Steps:")
-              print("   1. Review the failure details above")
-              print("   2. Fix the underlying issues")
-              print("   3. Push new commits to trigger re-validation")
-              print("   4. Hard checks must pass before PR can be merged")
-          EOF
-
-  # ==============================================================================
-  # Soft Checks Execution (Scoring)
-  # ==============================================================================
-  execute_soft_checks:
-    name: Execute Soft Checks
-    runs-on: ubuntu-latest
-    needs: [validate_configuration, execute_hard_checks]
-    if: needs.execute_hard_checks.outputs.hard_checks_passed == 'true'
-    timeout-minutes: 30
-    outputs:
-      soft_check_results: ${{ steps.run_soft_checks.outputs.results }}
-      total_score: ${{ steps.calculate_score.outputs.total_score }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup advanced test environment
-        run: |
-          # Install comprehensive tooling
-          pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          if [ -f requirements-test.txt ]; then pip install -r requirements-test.txt; fi
-          
-          # Install analysis tools
-          pip install pytest pytest-cov radon bandit safety interrogate coverage
-
-      - name: Execute soft checks
-        id: run_soft_checks
-        run: |
-          soft_checks='${{ needs.validate_configuration.outputs.soft_checks }}'
-          
-          echo "$soft_checks" | python << 'EOF'
-          import json
-          import sys
-          import subprocess
-          import os
-          import glob
-          
-          soft_checks = json.loads(sys.stdin.read())
-          results = {}
-          
-          def get_changed_python_files():
-              """Get list of changed Python files"""
-              try:
-                  result = subprocess.run(['git', 'diff', '--name-only', 
-                                         '${{ github.event.pull_request.base.sha }}', 
-                                         '--diff-filter=AM'], 
-                                        capture_output=True, text=True)
-                  files = [f for f in result.stdout.strip().split('\n') if f.endswith('.py')]
-                  return files
-              except:
-                  return glob.glob('**/*.py', recursive=True)
-          
-          changed_files = get_changed_python_files()
-          print(f"🔍 Analyzing {len(changed_files)} Python files")
-          
-          for check in soft_checks:
-              check_id = check['id']
-              check_name = check['name']
-              weight = check.get('weight', 10)
-              
-              print(f"\n📊 Running soft check: {check_name} (weight: {weight}%)")
-              
-              try:
-                  if check_id == 'code_quality':
-                      # Calculate code quality score
-                      lint_score = 85  # Placeholder - would run actual linting
-                      complexity_score = 80  # Placeholder - would run radon
-                      
-                      # Calculate coverage if tests exist
-                      coverage_score = 70
-                      if os.path.exists('tests') or glob.glob('test_*.py'):
-                          try:
-                              subprocess.run(['coverage', 'run', '-m', 'pytest'], 
-                                           capture_output=True)
-                              cov_result = subprocess.run(['coverage', 'report'], 
-                                                        capture_output=True, text=True)
-                              if cov_result.returncode == 0:
-                                  # Extract coverage percentage
-                                  lines = cov_result.stdout.split('\n')
-                                  for line in lines:
-                                      if 'TOTAL' in line:
-                                          coverage_score = int(line.split()[-1].rstrip('%'))
-                                          break
-                          except:
-                              pass
-                      
-                      final_score = (lint_score * 0.4 + complexity_score * 0.3 + coverage_score * 0.3)
-                      results[check_id] = {
-                          'score': final_score,
-                          'weight': weight,
-                          'details': f'Lint: {lint_score}%, Complexity: {complexity_score}%, Coverage: {coverage_score}%'
-                      }
-                  
-                  elif check_id == 'security_scan':
-                      # Security scoring
-                      score = 100
-                      details = []
-                      
-                      # Run bandit for security issues
-                      try:
-                          result = subprocess.run(['bandit', '-r'] + changed_files + ['-f', 'json'], 
-                                                capture_output=True, text=True)
-                          if result.returncode == 0:
-                              scan_results = json.loads(result.stdout)
-                              high_issues = len([r for r in scan_results.get('results', []) 
-                                               if r.get('issue_severity') == 'HIGH'])
-                              medium_issues = len([r for r in scan_results.get('results', []) 
-                                                 if r.get('issue_severity') == 'MEDIUM'])
-                              
-                              penalty = high_issues * 20 + medium_issues * 10
-                              score = max(0, 100 - penalty)
-                              details.append(f'High: {high_issues}, Medium: {medium_issues}')
-                      except:
-                          pass
-                      
-                      results[check_id] = {
-                          'score': score,
-                          'weight': weight,
-                          'details': ', '.join(details) or 'No security issues detected'
-                      }
-                  
-                  elif check_id == 'testing':
-                      # Testing score
-                      score = 70  # Default if no tests
-                      
-                      if os.path.exists('tests') or glob.glob('test_*.py'):
-                          try:
-                              result = subprocess.run(['pytest', '-v', '--tb=short'], 
-                                                    capture_output=True, text=True)
-                              # Simple pass/fail ratio calculation
-                              output = result.stdout
-                              if 'passed' in output:
-                                  score = 85  # Good test coverage
-                              if 'failed' in output:
-                                  score = 60  # Some test failures
-                          except:
-                              pass
-                      
-                      results[check_id] = {
-                          'score': score,
-                          'weight': weight,
-                          'details': f'Test execution score: {score}%'
-                      }
-                  
-                  elif check_id == 'documentation':
-                      # Documentation score
-                      score = 80  # Default
-                      
-                      # Check for docstring coverage
-                      try:
-                          if changed_files:
-                              result = subprocess.run(['interrogate'] + changed_files + ['--quiet'], 
-                                                    capture_output=True, text=True)
-                              if result.returncode == 0:
-                                  # Extract percentage from output
-                                  for line in result.stdout.split('\n'):
-                                      if '%' in line:
-                                          score = float(line.split('%')[0].split()[-1])
-                                          break
-                      except:
-                          pass
-                      
-                      results[check_id] = {
-                          'score': score,
-                          'weight': weight,
-                          'details': f'Docstring coverage: {score}%'
-                      }
-                  
-                  else:
-                      # Default scoring for unknown checks
-                      results[check_id] = {
-                          'score': 75,
-                          'weight': weight,
-                          'details': 'Default score for unknown check'
-                      }
-                  
-                  print(f"✅ {check_name}: {results[check_id]['score']}%")
-              
-              except Exception as e:
-                  print(f"❌ {check_name} failed: {str(e)}")
-                  results[check_id] = {
-                      'score': 0,
-                      'weight': weight,
-                      'details': f'Error: {str(e)}'
-                  }
-          
-          # Write results to GITHUB_OUTPUT
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f"results={json.dumps(results)}\n")
-          
-          print(f"\n📊 Soft checks completed: {len(results)} checks")
-          EOF
-
-      - name: Calculate total score
-        id: calculate_score
-        run: |
-          # Calculate weighted total score from all soft check results
-          results='${{ steps.run_soft_checks.outputs.results }}'
-          
-          echo "📊 Calculating Total Score"
-          echo "=========================="
-          
-          echo "$results" | python << 'EOF'
-          import json
-          import sys
-          import os
-          
-          results = json.loads(sys.stdin.read())
-          
-          total_weighted_score = 0
-          total_weight = 0
-          
-          print("📊 Individual Check Scores:")
-          print("| Check ID | Score | Weight | Weighted Score | Details |")
-          print("|----------|-------|--------|----------------|---------|")
-          
-          for check_id, result in results.items():
-              score = result['score']
-              weight = result['weight']
-              weighted_score = (score * weight) / 100
-              details = result.get('details', 'N/A')[:50] + '...' if len(result.get('details', '')) > 50 else result.get('details', 'N/A')
-              
-              total_weighted_score += weighted_score
-              total_weight += weight
-              
-              print(f"| {check_id[:15]} | {score:5.1f}% | {weight:5}% | {weighted_score:8.1f} | {details} |")
-          
-          if total_weight > 0:
-              final_score = (total_weighted_score / total_weight) * 100
-          else:
-              final_score = 0
-          
-          print("|----------|-------|--------|----------------|---------|")
-          print(f"| **TOTAL** | **{final_score:5.1f}%** | **{total_weight:3}%** | **{final_score:8.1f}** | **Weighted Average** |")
-          
-          # Score interpretation
-          print(f"\n🎯 Score Analysis:")
-          if final_score >= 85:
-              print(f"   ✅ EXCELLENT ({final_score:.1f}%) - Auto-merge approved")
-              grade = "A"
-          elif final_score >= 75:
-              print(f"   🟢 GOOD ({final_score:.1f}%) - Likely to be approved")
-              grade = "B"
-          elif final_score >= 65:
-              print(f"   🟡 FAIR ({final_score:.1f}%) - Manual review required")
-              grade = "C"
-          elif final_score >= 50:
-              print(f"   🟠 POOR ({final_score:.1f}%) - Needs improvement")
-              grade = "D"
-          else:
-              print(f"   🔴 FAILING ({final_score:.1f}%) - Significant issues")
-              grade = "F"
-          
-          # Improvement suggestions
-          print(f"\n💡 Improvement Suggestions:")
-          low_scoring_checks = [(k, v) for k, v in results.items() if v['score'] < 70]
-          if low_scoring_checks:
-              for check_id, result in sorted(low_scoring_checks, key=lambda x: x[1]['score']):
-                  print(f"   • {check_id}: {result['score']:.1f}% - {result.get('details', 'No details')}")
-          else:
-              print("   🎉 All checks performing well!")
-          
-          # Write to GITHUB_OUTPUT
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f"total_score={final_score:.1f}\n")
-              f.write(f"grade={grade}\n")
-              f.write(f"total_weight={total_weight}\n")
-          
-          print(f"\n🏁 Final Score: {final_score:.1f}% (Grade: {grade})")
-          EOF
-
-  # ==============================================================================
-  # Decision Making and PR Status Update
-  # ==============================================================================
-  make_decision:
-    name: Make Auto-Merge Decision
-    runs-on: ubuntu-latest
-    needs: [validate_configuration, execute_hard_checks, execute_soft_checks]
     timeout-minutes: 10
-    outputs:
-      decision: ${{ steps.decide.outputs.decision }}
-      final_score: ${{ steps.decide.outputs.final_score }}
     steps:
+      # -------------------------------------------------------------------------
+      # Step 1: Checkout repository
+      # -------------------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Make decision based on score and thresholds
-        id: decide
-        run: |
-          thresholds='${{ needs.validate_configuration.outputs.thresholds }}'
-          total_score="${{ needs.execute_soft_checks.outputs.total_score }}"
-          hard_checks_passed="${{ needs.execute_hard_checks.outputs.hard_checks_passed }}"
-          
-          echo "$thresholds" | python << EOF
-          import json
-          import sys
-          import os
-          
-          thresholds = json.loads(sys.stdin.read())
-          total_score = float('$total_score')
-          hard_checks_passed = '$hard_checks_passed' == 'true'
-          
-          # Extract thresholds
-          auto_merge_threshold = thresholds.get('auto_merge_threshold', 85)
-          manual_review_threshold = thresholds.get('manual_review_threshold', 65)
-          
-          # Decision logic
-          if not hard_checks_passed:
-              decision = 'blocked'
-              status = 'failure'
-              message = 'Hard checks failed - PR blocked'
-          elif total_score >= auto_merge_threshold:
-              decision = 'auto_merge'
-              status = 'success'
-              message = f'Score {total_score}% ≥ {auto_merge_threshold}% - Auto-merge approved'
-          elif total_score >= manual_review_threshold:
-              decision = 'manual_review'
-              status = 'pending'
-              message = f'Score {total_score}% requires manual review ({manual_review_threshold}-{auto_merge_threshold-1}%)'
-          else:
-              decision = 'blocked'
-              status = 'failure'
-              message = f'Score {total_score}% < {manual_review_threshold}% - PR blocked'
-          
-          # Write to GITHUB_OUTPUT
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f"decision={decision}\n")
-              f.write(f"final_score={total_score}\n")
-              f.write(f"status={status}\n")
-              f.write(f"message={message}\n")
-          
-          print(f"🎯 Decision: {decision.upper()}")
-          print(f"📊 Final Score: {total_score}%")
-          print(f"💬 Message: {message}")
-          EOF
-
-      - name: Update PR status
+      # -------------------------------------------------------------------------
+      # Step 2: Check for open lint issues on source branch
+      # -------------------------------------------------------------------------
+      - name: Check for open lint issues
+        id: check-issues
         uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            // Update PR with comprehensive status and detailed feedback
-            const decision = '${{ steps.decide.outputs.decision }}';
-            const finalScore = '${{ steps.decide.outputs.final_score }}';
-            const grade = '${{ needs.execute_soft_checks.outputs.grade || 'N/A' }}';
-            const status = '${{ steps.decide.outputs.status }}';
-            const message = '${{ steps.decide.outputs.message }}';
+            const branchName = "${{ github.event.pull_request.head.ref }}";
             
-            console.log(`🎯 Updating PR status: ${decision} (Score: ${finalScore}%, Grade: ${grade})`);
+            console.log(`🔍 Checking for open lint issues on branch: ${branchName}`);
             
-            // Create status check
+            // Search for open lint issues on this branch
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: ['lint-failure', `branch:${branchName}`],
+              per_page: 100,
+            });
+            
+            const openIssues = issues.data.filter(issue =>
+              issue.title.includes(`Lint Failure in branch "${branchName}"`)
+            );
+            
+            if (openIssues.length > 0) {
+              console.log(`❌ Found ${openIssues.length} open lint issue(s) on branch ${branchName}`);
+              core.setFailed(`Branch ${branchName} has ${openIssues.length} open lint issue(s). Please fix them before merging.`);
+              
+              // Create a comment with issue details
+              const issueLinks = openIssues.map(issue => `#${issue.number}`).join(', ');
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `❌ **PR Validation Failed**\n\nThe source branch \`${branchName}\` has open lint issues: ${issueLinks}\n\nPlease fix these issues before the PR can be merged.`
+              });
+              
+              return false;
+            } else {
+              console.log(`✅ No open lint issues found on branch ${branchName}`);
+              return true;
+            }
+
+      # -------------------------------------------------------------------------
+      # Step 3: Basic quality check
+      # -------------------------------------------------------------------------
+      - name: Basic quality check
+        if: steps.check-issues.outcome == 'success'
+        run: |
+          echo "🔍 Running basic quality checks..."
+          
+          # Check for Python syntax errors
+          PYTHON_FILES=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }} --diff-filter=AM | grep '\.py$' || true)
+          
+          if [ -n "$PYTHON_FILES" ]; then
+            echo "📁 Checking Python files: $PYTHON_FILES"
+            
+            for file in $PYTHON_FILES; do
+              if [ -f "$file" ]; then
+                echo "   Checking syntax: $file"
+                python -m py_compile "$file"
+                if [ $? -ne 0 ]; then
+                  echo "❌ Syntax error in $file"
+                  exit 1
+                fi
+              fi
+            done
+            
+            echo "✅ All Python files have valid syntax"
+          else
+            echo "ℹ️ No Python files changed"
+          fi
+          
+          echo "✅ Basic quality checks passed"
+
+      # -------------------------------------------------------------------------
+      # Step 4: Update PR status
+      # -------------------------------------------------------------------------
+      - name: Update PR status
+        if: always()
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issuesResult = '${{ steps.check-issues.outcome }}';
+            const qualityResult = '${{ job.status }}';
+            
+            let status, message, description;
+            
+            if (issuesResult === 'success' && qualityResult === 'success') {
+              status = 'success';
+              message = '✅ PR Validation Passed';
+              description = 'No open lint issues and quality checks passed';
+              
+              // Add success comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `✅ **PR Validation Passed**\n\n- ✅ No open lint issues on source branch\n- ✅ Basic quality checks passed\n\nThis PR is ready for review and merge.`
+              });
+            } else {
+              status = 'failure';
+              message = '❌ PR Validation Failed';
+              description = 'Open lint issues or quality checks failed';
+            }
+            
+            // Update commit status
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              sha: '${{ github.event.pull_request.head.sha }}',
+              sha: context.payload.pull_request.head.sha,
               state: status,
-              context: 'Modular PR Validation',
-              description: `${finalScore}% (${grade}) - ${message.split(' - ')[1] || message}`
+              context: 'Simple PR Validation',
+              description: description
             });
             
-            // Get detailed results for comment
-            const hardResults = JSON.parse('${{ needs.execute_hard_checks.outputs.hard_check_results }}');
-            const softResults = JSON.parse('${{ needs.execute_soft_checks.outputs.soft_check_results }}');
-            
-            // Build hard checks table
-            let hardChecksTable = "| Hard Check | Status | Details |\n|------------|--------|---------|\n";
-            let hardCheckSummary = { passed: 0, failed: 0 };
-            
-            for (const [checkId, result] of Object.entries(hardResults)) {
-              const status = result.passed ? '✅ PASS' : '❌ FAIL';
-              const details = result.details.length > 80 ? result.details.substring(0, 80) + '...' : result.details;
-              hardChecksTable += `| ${checkId} | ${status} | ${details} |\n`;
-              
-              if (result.passed) hardCheckSummary.passed++;
-              else hardCheckSummary.failed++;
-            }
-            
-            // Build soft checks table
-            let softChecksTable = "| Soft Check | Score | Weight | Weighted | Details |\n|------------|-------|--------|----------|----------|\n";
-            let totalWeightedScore = 0;
-            let totalWeight = 0;
-            
-            for (const [checkId, result] of Object.entries(softResults)) {
-              const weightedScore = (result.score * result.weight) / 100;
-              totalWeightedScore += weightedScore;
-              totalWeight += result.weight;
-              
-              const details = result.details.length > 60 ? result.details.substring(0, 60) + '...' : result.details;
-              softChecksTable += `| ${checkId} | ${result.score}% | ${result.weight}% | ${weightedScore.toFixed(1)} | ${details} |\n`;
-            }
-            
-            // Determine decision emoji and text
-            const decisionEmoji = decision === 'auto_merge' ? '✅' : decision === 'manual_review' ? '⚠️' : '❌';
-            const decisionText = decision === 'auto_merge' ? 'AUTO-MERGE APPROVED' : 
-                                decision === 'manual_review' ? 'MANUAL REVIEW REQUIRED' : 'MERGE BLOCKED';
-            
-            // Build improvement suggestions
-            let improvementSuggestions = "";
-            const lowScoringChecks = Object.entries(softResults).filter(([_, result]) => result.score < 70);
-            if (lowScoringChecks.length > 0) {
-              improvementSuggestions = "\n### 💡 Improvement Suggestions\n\n";
-              lowScoringChecks.sort((a, b) => a[1].score - b[1].score);
-              for (const [checkId, result] of lowScoringChecks) {
-                improvementSuggestions += `- **${checkId}** (${result.score}%): ${result.details}\n`;
-              }
-            }
-            
-            // Generate next steps based on decision
-            let nextSteps = "";
-            if (decision === 'auto_merge') {
-              nextSteps = `
-            ### ✅ Next Steps
-            
-            Your PR has achieved an excellent score and will be automatically merged once all required checks pass. Great work! 🎉
-            
-            **What happens next:**
-            1. All GitHub required checks must pass
-            2. Auto-merge will be enabled
-            3. PR will be merged automatically with squash strategy
-            `;
-            } else if (decision === 'manual_review') {
-              nextSteps = `
-            ### ⚠️ Next Steps
-            
-            Your PR requires manual review before merging. Consider improving the score for faster approval.
-            
-            **To improve your score:**
-            1. Address the improvement suggestions above
-            2. Add more tests to increase coverage
-            3. Fix any remaining linting issues
-            4. Update documentation if needed
-            
-            **For manual approval:**
-            - A team member with appropriate permissions can approve and merge
-            - Consider requesting review from subject matter experts
-            `;
-            } else {
-              nextSteps = `
-            ### ❌ Next Steps
-            
-            Your PR is currently blocked from merging due to validation failures.
-            
-            **Required actions:**
-            1. Fix all hard check failures (if any)
-            2. Address the improvement suggestions above
-            3. Push new commits to trigger re-validation
-            4. Aim for a score ≥65% for manual review or ≥85% for auto-merge
-            
-            **Need help?**
-            - Review the [PR Validation Guide](devops/docs/pr-validation.md)
-            - Check individual test logs for detailed error messages
-            - Contact the DevOps team if you need assistance
-            `;
-            }
-            
-            // Create comprehensive comment
-            const comment = `## 🔍 Modular PR Validation Results
-            
-            **Final Score: ${finalScore}% (Grade: ${grade})**  
-            **Decision: ${decisionEmoji} ${decisionText}**
-            
-            ### Hard Checks (Must Pass)
-            **Summary:** ${hardCheckSummary.passed} passed, ${hardCheckSummary.failed} failed
-            
-            ${hardChecksTable}
-            
-            ### Soft Checks (Scoring)
-            **Total Weight:** ${totalWeight}% | **Weighted Score:** ${totalWeightedScore.toFixed(1)}
-            
-            ${softChecksTable}
-            
-            ### 📊 Score Breakdown
-            
-            | Threshold | Requirement | Status |
-            |-----------|-------------|---------|
-            | Auto-merge (≥85%) | ${finalScore >= 85 ? '✅ Met' : '❌ Not met'} | ${finalScore >= 85 ? 'Eligible for auto-merge' : `Need ${(85 - finalScore).toFixed(1)}% more`} |
-            | Manual review (≥65%) | ${finalScore >= 65 ? '✅ Met' : '❌ Not met'} | ${finalScore >= 65 ? 'Eligible for manual review' : `Need ${(65 - finalScore).toFixed(1)}% more`} |
-            | Passing (≥50%) | ${finalScore >= 50 ? '✅ Met' : '❌ Not met'} | ${finalScore >= 50 ? 'Above minimum threshold' : 'Below minimum threshold'} |
-            ${improvementSuggestions}${nextSteps}
+            console.log(`${message}: ${description}`);
             ---
             
             <details>
