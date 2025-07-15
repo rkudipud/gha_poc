@@ -8,8 +8,9 @@ import math      # unused import
 
 # no docstring for this function
 def calculate_something(x,y,z,  unused_param):  # too many spaces, unused parameter
-    
-    
+    """
+    ddd
+    """
     
     # too many blank lines above
     result=x+y*z # missing spaces around operators
