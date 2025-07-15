@@ -226,7 +226,7 @@ The GitHub Actions are organized into workflows, reusable actions, and configura
 - **pr-validation.yml**: Triggered on PR creation and updates
 
 #### Reusable Actions (`.github/actions/`)
-- **python-lint-enhanced/**: Enhanced Python linting with waiver support
+- **python-lint/**: Python linting with waiver support
 - **consistency-check/**: Code consistency validation
 - **security-scan/**: Security vulnerability and secret scanning
 - **coverage-check/**: Test coverage analysis and reporting

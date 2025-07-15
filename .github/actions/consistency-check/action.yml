@@ -200,10 +200,10 @@ runs:
           fi
         fi
 
-    - name: Generate Enhanced Report
+    - name: Generate Report
       shell: bash
       run: |
-        echo "📄 Generating enhanced consistency report..."
+        echo "📄 Generating consistency report..."
         
         # Create comprehensive JSON report
         cat > consistency-reports/detailed-report.json << EOF
@@ -255,7 +255,7 @@ fi)
 **Generated**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
 EOF
 
-        echo "✅ Enhanced consistency report generated"
+        echo "✅ Consistency report generated"
 
     - name: Copy Main Report
       shell: bash

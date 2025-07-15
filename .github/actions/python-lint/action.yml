@@ -1,4 +1,4 @@
-name: "Enhanced Python Linting with Waivers"
+name: "Python Linting with Waivers"
 description: "Advanced Python linting with waiver support, multiple linters, and performance optimization"
 
 inputs:
@@ -13,7 +13,7 @@ inputs:
   enable-waivers:
     description: 'Enable waiver mechanism for lint exceptions'
     required: false
-    default: 'true'
+    default: 'false'
   linters:
     description: 'Comma-separated list of linters to run (flake8,pylint,mypy)'
     required: false
@@ -32,10 +32,10 @@ outputs:
     value: ${{ steps.calculate_score.outputs.score }}
   log-path:
     description: 'Path to the main verbose lint log file'
-    value: './enhanced_lint_results.log'
+    value: './lint_results.log'
   stats-log-path:
     description: 'Path to the statistics lint log file'
-    value: './enhanced_lint_stats.log'
+    value: './lint_stats.log'
   waiver-log-path:
     description: 'Path to the waiver application log'
     value: './waiver_log.json'
@@ -114,10 +114,10 @@ runs:
         import yaml
         import json
         import os
+        import glob
         from datetime import datetime
+        from pathlib import Path
         
-        # Use centralized waiver file
-        waiver_file = 'consistency_checker/waivers.yml'
         waiver_log = {
             'processed_at': datetime.now().isoformat(),
             'waivers_applied': [],
@@ -125,76 +125,76 @@ runs:
             'invalid_waivers': []
         }
         
-        if os.path.exists(waiver_file):
-            try:
-                with open(waiver_file, 'r') as f:
-                    waivers_config = yaml.safe_load(f)
-                
-                # Load centralized waiver format
-                all_waivers = []
-                
-                # Rule-based waivers
-                if 'rule_waivers' in waivers_config:
-                    all_waivers.extend(waivers_config['rule_waivers'])
-                # Bulk waivers
-                if 'bulk_waivers' in waivers_config:
-                    # Convert bulk waivers to individual waivers for processing
-                    for bulk_waiver in waivers_config['bulk_waivers']:
-                        pattern = bulk_waiver.get('pattern', '')
-                        rules = bulk_waiver.get('rules', [])
-                        if rules == '*' or 'all' in rules:
-                            rules = ['*']  # All rules
-                        elif isinstance(rules, str):
-                            rules = [rules]
-                        
-                        for rule in rules:
-                            all_waivers.append({
-                                'file': pattern,
-                                'rule': rule,
-                                'reason': bulk_waiver.get('reason', ''),
-                                'approved_by': bulk_waiver.get('approved_by', ''),
-                                'expires': bulk_waiver.get('expires')
-                            })
-                
-                current_date = datetime.now().date()
-                
-                for waiver in all_waivers:
-                    # Validate waiver structure
-                    required_fields = ['file', 'rule', 'reason', 'approved_by']
-                    if not all(field in waiver for field in required_fields):
-                        waiver_log['invalid_waivers'].append({
-                            'waiver': waiver,
-                            'reason': 'Missing required fields'
-                        })
-                        continue
-                    
-                    # Check expiration
-                    if 'expires' in waiver:
+        # Load rule-specific waivers from devops/consistency_checker/rules/*/
+        rules_dir = Path('devops/consistency_checker/rules')
+        all_waivers = []
+        
+        if rules_dir.exists():
+            for rule_dir in rules_dir.iterdir():
+                if rule_dir.is_dir() and rule_dir.name != '__pycache__':
+                    waiver_file = rule_dir / f"{rule_dir.name}_waivers.yml"
+                    if waiver_file.exists():
                         try:
-                            expire_date = datetime.strptime(waiver['expires'], '%Y-%m-%d').date()
-                            if current_date > expire_date:
-                                waiver_log['expired_waivers'].append(waiver)
-                                continue
-                        except ValueError:
-                            waiver_log['invalid_waivers'].append({
-                                'waiver': waiver,
-                                'reason': 'Invalid expiration date format'
-                            })
-                            continue
-                    
-                    waiver_log['waivers_applied'].append(waiver)
+                            with open(waiver_file, 'r') as f:
+                                waiver_config = yaml.safe_load(f) or {}
+                            
+                            rule_name = rule_dir.name
+                            
+                            # Process rule_waivers (rule-level waivers)
+                            for waiver in waiver_config.get('rule_waivers', []):
+                                waiver['rule_source'] = rule_name
+                                waiver['waiver_type'] = 'rule_based'
+                                all_waivers.append(waiver)
+                            
+                            # Process file_waivers (file pattern waivers)
+                            for waiver in waiver_config.get('file_waivers', []):
+                                waiver['rule_source'] = rule_name
+                                waiver['waiver_type'] = 'file_based'
+                                all_waivers.append(waiver)
+                            
+                            # Process line_waivers (line-specific waivers)
+                            for waiver in waiver_config.get('line_waivers', []):
+                                waiver['rule_source'] = rule_name
+                                waiver['waiver_type'] = 'line_specific'
+                                all_waivers.append(waiver)
+                            
+                            # Process pattern_waivers (message pattern waivers)
+                            for waiver in waiver_config.get('pattern_waivers', []):
+                                waiver['rule_source'] = rule_name
+                                waiver['waiver_type'] = 'pattern_based'
+                                all_waivers.append(waiver)
+                                
+                        except Exception as e:
+                            print(f"❌ Error loading waivers from {waiver_file}: {e}")
+        
+        current_date = datetime.now().date()
+        
+        for waiver in all_waivers:
+            # Check expiration
+            if waiver.get('expires'):
+                try:
+                    expire_date = datetime.strptime(waiver['expires'], '%Y-%m-%d').date()
+                    if current_date > expire_date:
+                        waiver_log['expired_waivers'].append(waiver)
+                        continue
+                except ValueError:
+                    waiver_log['invalid_waivers'].append({
+                        'waiver': waiver,
+                        'reason': 'Invalid expiration date format'
+                    })
+                    continue
+            
+            # Check if waiver is active
+            if not waiver.get('active', True):
+                continue
                 
-                print(f"✅ Processed {len(waiver_log['waivers_applied'])} valid waivers")
-                if waiver_log['expired_waivers']:
-                    print(f"⚠️ Found {len(waiver_log['expired_waivers'])} expired waivers")
-                if waiver_log['invalid_waivers']:
-                    print(f"❌ Found {len(waiver_log['invalid_waivers'])} invalid waivers")
-                    
-            except Exception as e:
-                print(f"❌ Error processing waivers: {e}")
-                waiver_log['error'] = str(e)
-        else:
-            print("ℹ️ No waiver file found (consistency_checker/waivers.yml)")
+            waiver_log['waivers_applied'].append(waiver)
+        
+        print(f"✅ Processed {len(waiver_log['waivers_applied'])} valid waivers from rule-specific files")
+        if waiver_log['expired_waivers']:
+            print(f"⚠️ Found {len(waiver_log['expired_waivers'])} expired waivers")
+        if waiver_log['invalid_waivers']:
+            print(f"❌ Found {len(waiver_log['invalid_waivers'])} invalid waivers")
         
         # Save waiver log
         with open('./waiver_log.json', 'w') as f:
@@ -282,32 +282,20 @@ runs:
       shell: bash
       run: |
         python3 << 'EOF'
-        import yaml
         import json
         import re
         import os
         import fnmatch
         from datetime import datetime
         
-        # Load waiver log
+        # Load waiver log with rule-specific waivers
         waiver_log = {}
+        active_waivers = []
+        
         if os.path.exists('./waiver_log.json'):
             with open('./waiver_log.json', 'r') as f:
                 waiver_log = json.load(f)
-        
-        # Load enhanced waivers
-        enhanced_waivers = {'rule_waivers': [], 'line_waivers': [], 'bulk_waivers': []}
-        # Load waivers from centralized location
-        waiver_config = {}
-        waiver_file = 'consistency_checker/waivers.yml'
-        
-        if os.path.exists(waiver_file):
-            try:
-                with open(waiver_file, 'r') as f:
-                    waiver_config = yaml.safe_load(f) or {}
-                    enhanced_waivers.update(waiver_config)
-            except Exception as e:
-                print(f"Error loading enhanced waivers: {e}")
+                active_waivers = waiver_log.get('waivers_applied', [])
         
         # Process flake8 results
         if os.path.exists('./flake8_machine.log'):
@@ -325,65 +313,48 @@ runs:
                 parts = line.split(':')
                 if len(parts) >= 4:
                     file_path = parts[0]
-                    line_num = parts[1]
+                    line_num = int(parts[1]) if parts[1].isdigit() else 0
                     rule_code = parts[3]
+                    message = ':'.join(parts[4:]) if len(parts) > 4 else ''
                     
                     waived = False
                     waiver_reason = ""
                     
-                    # Check line-specific waivers first (most specific)
-                    for waiver in enhanced_waivers.get('line_waivers', []):
-                        violation_line = waiver.get('violation_line', '')
-                        if violation_line and violation_line in line:
-                            # Check expiration
-                            if waiver.get('expires'):
-                                try:
-                                    expire_date = datetime.strptime(waiver['expires'], '%Y-%m-%d').date()
-                                    if datetime.now().date() > expire_date:
-                                        continue
-                                except ValueError:
-                                    continue
-                            
-                            waived = True
-                            waiver_reason = f"Line-specific waiver: {waiver.get('reason', 'No reason')}"
-                            break
-                    
-                    # Check rule-based waivers
-                    if not waived:
-                        for waiver in enhanced_waivers.get('rule_waivers', []):
-                            if (waiver.get('file') in file_path and 
-                                waiver.get('rule') == rule_code):
-                                # Check expiration
-                                if waiver.get('expires'):
-                                    try:
-                                        expire_date = datetime.strptime(waiver['expires'], '%Y-%m-%d').date()
-                                        if datetime.now().date() > expire_date:
-                                            continue
-                                    except ValueError:
-                                        continue
-                                
+                    # Check all active waivers
+                    for waiver in active_waivers:
+                        waiver_type = waiver.get('waiver_type', 'unknown')
+                        
+                        # Line-specific waivers (highest priority)
+                        if waiver_type == 'line_specific':
+                            if (waiver.get('file') == file_path and 
+                                waiver.get('line') == line_num):
+                                waived = True
+                                waiver_reason = f"Line waiver: {waiver.get('reason', 'No reason')}"
+                                break
+                        
+                        # File-based waivers (medium priority)
+                        elif waiver_type == 'file_based':
+                            file_pattern = waiver.get('pattern') or waiver.get('file_pattern', '')
+                            if fnmatch.fnmatch(file_path, file_pattern):
+                                waived = True
+                                waiver_reason = f"File waiver: {waiver.get('reason', 'No reason')}"
+                                break
+                        
+                        # Rule-based waivers (lower priority)
+                        elif waiver_type == 'rule_based':
+                            scope_pattern = waiver.get('scope') or waiver.get('file_pattern', '*')
+                            if fnmatch.fnmatch(file_path, scope_pattern):
                                 waived = True
                                 waiver_reason = f"Rule waiver: {waiver.get('reason', 'No reason')}"
                                 break
-                    
-                    # Check bulk waivers
-                    if not waived:
-                        for waiver in enhanced_waivers.get('bulk_waivers', []):
-                            if waiver.get('rule') == rule_code:
-                                pattern = waiver.get('pattern', '')
-                                if fnmatch.fnmatch(file_path, pattern):
-                                    # Check expiration
-                                    if waiver.get('expires'):
-                                        try:
-                                            expire_date = datetime.strptime(waiver['expires'], '%Y-%m-%d').date()
-                                            if datetime.now().date() > expire_date:
-                                                continue
-                                        except ValueError:
-                                            continue
-                                    
-                                    waived = True
-                                    waiver_reason = f"Bulk waiver: {waiver.get('reason', 'No reason')}"
-                                    break
+                        
+                        # Pattern-based waivers (message matching)
+                        elif waiver_type == 'pattern_based':
+                            pattern = waiver.get('pattern', '')
+                            if pattern and re.search(pattern, message):
+                                waived = True
+                                waiver_reason = f"Pattern waiver: {waiver.get('reason', 'No reason')}"
+                                break
                     
                     if waived:
                         waived_count += 1
@@ -410,9 +381,9 @@ runs:
         echo "📋 Generating consolidated lint report..."
         
         # Create consolidated report
-        cat > ./enhanced_lint_results.log << 'EOF'
+        cat > ./lint_results.log << 'EOF'
         ================================================================================
-        Enhanced Python Linting Report
+        Python Linting Report
         ================================================================================
         Generated: $(date)
         Files processed: ${{ steps.get_files.outputs.changed-files }}
@@ -423,29 +394,29 @@ runs:
         
         # Add Flake8 results
         if [[ "${{ steps.flake8.outputs.flake8_completed }}" == "true" ]]; then
-          echo "=== FLAKE8 RESULTS ===" >> ./enhanced_lint_results.log
+          echo "=== FLAKE8 RESULTS ===" >> ./lint_results.log
           
           if [[ "${{ inputs.enable-waivers }}" == "true" ]] && [[ -f "./flake8_filtered.log" ]]; then
-            cat ./flake8_filtered.log >> ./enhanced_lint_results.log
+            cat ./flake8_filtered.log >> ./lint_results.log
           elif [[ -f "./flake8_results.log" ]]; then
-            cat ./flake8_results.log >> ./enhanced_lint_results.log
+            cat ./flake8_results.log >> ./lint_results.log
           fi
           
-          echo "" >> ./enhanced_lint_results.log
+          echo "" >> ./lint_results.log
         fi
         
         # Add Pylint results
         if [[ "${{ steps.pylint.outputs.pylint_completed }}" == "true" ]] && [[ -f "./pylint_results.log" ]]; then
-          echo "=== PYLINT RESULTS ===" >> ./enhanced_lint_results.log
-          cat ./pylint_results.log >> ./enhanced_lint_results.log
-          echo "" >> ./enhanced_lint_results.log
+          echo "=== PYLINT RESULTS ===" >> ./lint_results.log
+          cat ./pylint_results.log >> ./lint_results.log
+          echo "" >> ./lint_results.log
         fi
         
         # Add MyPy results
         if [[ "${{ steps.mypy.outputs.mypy_completed }}" == "true" ]] && [[ -f "./mypy_results.log" ]]; then
-          echo "=== MYPY RESULTS ===" >> ./enhanced_lint_results.log
-          cat ./mypy_results.log >> ./enhanced_lint_results.log
-          echo "" >> ./enhanced_lint_results.log
+          echo "=== MYPY RESULTS ===" >> ./lint_results.log
+          cat ./mypy_results.log >> ./lint_results.log
+          echo "" >> ./lint_results.log
         fi
         
         # Generate statistics
@@ -458,11 +429,11 @@ runs:
           TOTAL_ISSUES=$((TOTAL_ISSUES + FLAKE8_ISSUES))
         fi
         
-        echo "=== SUMMARY ===" > ./enhanced_lint_stats.log
-        echo "Total issues found: $TOTAL_ISSUES" >> ./enhanced_lint_stats.log
+        echo "=== SUMMARY ===" > ./lint_stats.log
+        echo "Total issues found: $TOTAL_ISSUES" >> ./lint_stats.log
         if [[ "${{ inputs.enable-waivers }}" == "true" ]]; then
           WAIVED_COUNT="${{ steps.apply_waivers.outputs.remaining_issues }}"
-          echo "Issues after waivers: $WAIVED_COUNT" >> ./enhanced_lint_stats.log
+          echo "Issues after waivers: $WAIVED_COUNT" >> ./lint_stats.log
         fi
         
         echo "total_issues=$TOTAL_ISSUES" >> $GITHUB_OUTPUT
@@ -533,8 +504,8 @@ runs:
         echo "ℹ️ No Python files to lint - skipping"
         
         # Create empty log files
-        echo "No Python files changed - linting skipped" > ./enhanced_lint_results.log
-        echo "No issues found (skipped)" > ./enhanced_lint_stats.log
+        echo "No Python files changed - linting skipped" > ./lint_results.log
+        echo "No issues found (skipped)" > ./lint_stats.log
         echo "{\"skipped\": true}" > ./waiver_log.json
 
     # Final status output

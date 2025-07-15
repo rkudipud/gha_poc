@@ -107,12 +107,12 @@ test_suite:
   # WEIGHTED CHECKS - Contribute to overall score
   # ==============================================================================
   
-  - id: "python_lint_enhanced"
-    name: "Enhanced Python Linting"
+  - id: "python_lint"
+    name: "Python Linting"
     description: "Comprehensive Python code quality analysis"
     weight: 25
     enforcement: "soft"
-    action_path: ".github/actions/python-lint-enhanced"
+    action_path: ".github/actions/python-lint"
     timeout_minutes: 10
     inputs:
       changed-only: true
@@ -241,7 +241,7 @@ test_suite:
 execution_config:
   # Tests that can run in parallel
   parallel_groups:
-    - ["python_lint_enhanced", "documentation_check", "consistency_check"]
+    - ["python_lint", "documentation_check", "consistency_check"]
     - ["code_coverage", "integration_tests"]
     - ["security_scan_soft", "performance_test"]
   
@@ -249,7 +249,7 @@ execution_config:
   sequential_dependencies:
     - prerequisite: "branch_protection"
       dependents: ["security_critical", "license_compliance"]
-    - prerequisite: "python_lint_enhanced"
+    - prerequisite: "python_lint"
       dependents: ["code_coverage"]
 
 # ==============================================================================
@@ -319,7 +319,7 @@ environment_overrides:
       - id: "performance_test"
         weight: 25              # Increase performance weight
   
-  # Security environment - enhanced security checks
+  # Security environment - security checks
   security:
     global_config:
       auto_merge_threshold: 90  # Higher bar for security changes
@@ -384,7 +384,7 @@ notifications:
 # Define paths to custom validation actions for reusability
 custom_actions:
   # Security scanning
-  security_scan_enhanced: ".github/actions/security-scan-enhanced"
+  security_scan: ".github/actions/security-scan"
   vulnerability_check: ".github/actions/vulnerability-check"
   
   # Performance testing
@@ -603,7 +603,7 @@ metadata:
   changelog:
     - version: "2.1.0"
       date: "2025-07-03"
-      changes: ["Added comprehensive template sections", "Enhanced documentation", "Added troubleshooting guide"]
+      changes: ["Added comprehensive template sections", "Improved documentation", "Added troubleshooting guide"]
     - version: "2.0.0"  
       date: "2025-07-02"
       changes: ["Migrated to modular architecture", "Added environment overrides", "Implemented auto-merge"]

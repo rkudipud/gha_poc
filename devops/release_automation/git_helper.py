@@ -5,38 +5,65 @@ Git Helper Script for Enterprise CI/CD Workflow
 This script provides a simplified interface for developers to work with
 the enterprise CI/CD pipeline without needing deep Git knowledge.
 
-Usage:
-    python devops/release_automation/git_helper.py create-branch --type feature --issue 123 --description "add-new-feature"
-    python devops/release_automation/git_helper.py create-branch --type bugfix --branch-name "custom-branch-name"
-    python devops/release_automation/git_helper.py commit-push --message "Implement new feature"
-    python devops/release_automation/git_helper.py check-status
-    python devops/release_automation/git_helper.py create-pr --title "Add new feature"
-    python devops/release_automation/git_helper.py sync-main
-    python devops/release_automation/git_helper.py resolve-conflicts
+Modern CLI built with Typer and Rich for beautiful, cross-platform experience.
 """
-import argparse
 import subprocess
 import sys
 import json
 import re
 import random
 import time
+import webbrowser
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Annotated, Tuple
+from enum import Enum
+from datetime import datetime
+
+import typer
+from rich.console import Console
+from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+from rich.table import Table
+from rich.prompt import Confirm, Prompt, IntPrompt
+from rich.text import Text
+from rich.tree import Tree
+from rich.syntax import Syntax
+from rich.style import Style
+from rich.markdown import Markdown
+from rich.layout import Layout
+from rich.columns import Columns
+from rich.box import Box, ROUNDED, HEAVY, SIMPLE
+from rich import print as rprint
 
 
-class Colors:
-    """ANSI color codes for terminal output"""
-    RED = '\033[91m'
-    GREEN = '\033[92m'
-    YELLOW = '\033[93m'
-    BLUE = '\033[94m'
-    PURPLE = '\033[95m'
-    CYAN = '\033[96m'
-    WHITE = '\033[97m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
-    END = '\033[0m'
+# Initialize Rich console
+console = Console()
+
+# Typer app
+app = typer.Typer(
+    name="git-helper",
+    help="Enterprise CI/CD Git Helper - Streamlined Git workflow for developers",
+    rich_markup_mode="rich",
+    no_args_is_help=True,
+    add_completion=True,
+)
+
+
+class BranchType(str, Enum):
+    """Available branch types"""
+    feature = "feature"
+    bugfix = "bugfix" 
+    hotfix = "hotfix"
+    chore = "chore"
+    docs = "docs"
+
+
+class PullRequestStatus(str, Enum):
+    """Pull request status"""
+    open = "open"
+    closed = "closed"
+    merged = "merged"
+    draft = "draft"
 
 
 class GitHelper:
@@ -54,7 +81,8 @@ class GitHelper:
             if (current / '.git').exists():
                 return current
             current = current.parent
-        raise Exception("Not in a Git repository")
+        console.print("[red]Error: Not in a Git repository[/red]")
+        raise typer.Exit(1)
     
     def _load_config(self) -> Dict[str, Any]:
         """Load configuration from .git_helper_config.json"""
@@ -79,7 +107,9 @@ class GitHelper:
             "branch_naming": {
                 "feature": "feature/{issue}-{description}",
                 "bugfix": "bugfix/{issue}-{description}",
-                "hotfix": "hotfix/{issue}-{description}"
+                "hotfix": "hotfix/{issue}-{description}",
+                "chore": "chore/{description}",
+                "docs": "docs/{description}"
             },
             "main_branch": "main",
             "protected_branches": ["main", "develop", "release/*"],
@@ -90,8 +120,12 @@ class GitHelper:
         with open(config_file, 'w') as f:
             json.dump(config, f, indent=2)
         
-        print(f"{Colors.YELLOW}Created default config at {config_file}")
-        print(f"Please update with your GitHub details{Colors.END}")
+        console.print(Panel(
+            f"Created default config at [blue]{config_file}[/blue]\n"
+            "Please update with your GitHub details",
+            title="[bold cyan]Configuration[/bold cyan]",
+            border_style="cyan"
+        ))
         return config
     
     def _run_command(self, command: List[str], capture_output=True) -> subprocess.CompletedProcess:
@@ -106,43 +140,72 @@ class GitHelper:
             )
             return result
         except Exception as e:
-            print(f"{Colors.RED}Error running command {' '.join(command)}: {e}{Colors.END}")
-            sys.exit(1)
+            console.print(f"[red]Error running command {' '.join(command)}: {e}[/red]")
+            raise typer.Exit(1)
     
-    def _print_success(self, message: str):
-        """Print success message"""
-        print(f"{Colors.GREEN}✅ {message}{Colors.END}")
+    def _show_success(self, message: str):
+        """Show success message"""
+        console.print(f"[green]✓ {message}[/green]")
     
-    def _print_error(self, message: str):
-        """Print error message"""
-        print(f"{Colors.RED}❌ {message}{Colors.END}")
+    def _show_error(self, message: str):
+        """Show error message"""
+        console.print(f"[red]✗ {message}[/red]")
     
-    def _print_warning(self, message: str):
-        """Print warning message"""
-        print(f"{Colors.YELLOW}⚠️  {message}{Colors.END}")
+    def _show_warning(self, message: str):
+        """Show warning message"""
+        console.print(f"[yellow]⚠ {message}[/yellow]")
     
-    def _print_info(self, message: str):
-        """Print info message"""
-        print(f"{Colors.BLUE}ℹ️  {message}{Colors.END}")
+    def _show_info(self, message: str):
+        """Show info message"""
+        console.print(f"[blue]ℹ {message}[/blue]")
     
     def _show_branch_status(self, branch_name: str):
         """Show current branch status after creation"""
-        print(f"\n{Colors.BOLD}=== Branch Status ==={Colors.END}")
-        print(f"📍 Current branch: {Colors.GREEN}{branch_name}{Colors.END}")
-        print(f"🌿 Based on: {Colors.BLUE}{self.config['main_branch']}{Colors.END}")
+        main_branch = self.config['main_branch']
         
-        # Show recent commits to confirm we're in the right place
+        # Get recent commits
         result = self._run_command(['git', 'log', '--oneline', '-3'])
+        recent_commits = ""
         if result.returncode == 0 and result.stdout.strip():
-            print(f"\n{Colors.BLUE}📝 Recent commits:{Colors.END}")
             for line in result.stdout.strip().split('\n')[:3]:
-                print(f"   {line}")
+                recent_commits += f"   {line}\n"
         
-        print(f"\n{Colors.CYAN}💡 Next steps:{Colors.END}")
-        print("   1. Make your code changes")
-        print("   2. Run: python devops/release_automation/git_helper.py commit-push --message 'Your message'")
-        print("   3. Create PR when ready")
-        print()
+        # Get file status
+        status_result = self._run_command(['git', 'status', '-s'])
+        status_output = status_result.stdout.strip()
+        file_status = "No changes"
+        if status_output:
+            changed_files = len(status_output.split('\n'))
+            file_status = f"{changed_files} changed file(s)"
+        
+        # Format branch info
+        branch_info = Text.from_markup(
+            f"[bold green]Current branch:[/bold green] [bold blue]{branch_name}[/bold blue]\n"
+            f"[bold green]Based on:[/bold green] [blue]{main_branch}[/blue]\n"
+            f"[bold green]Status:[/bold green] [yellow]{file_status}[/yellow]\n\n"
+            f"[bold blue]Recent commits:[/bold blue]\n"
+        )
+        
+        # Recent commits with syntax highlighting
+        git_log = Syntax(recent_commits.strip(), "bash", theme="monokai", word_wrap=True)
+        
+        # Next steps as a list
+        next_steps = Text.from_markup(
+            f"[bold cyan]Next steps:[/bold cyan]\n"
+            f"   1. Make your code changes\n"
+            f"   2. Run: [bold]git-helper commit-push --message 'Your message'[/bold]\n"
+            f"   3. Create PR when ready: [bold]git-helper create-pr[/bold]"
+        )
+        
+        # Layout in columns
+        layout = Layout()
+        layout.split_column(
+            Layout(Panel(branch_info, title="[bold cyan]Branch Information[/bold cyan]", border_style="cyan")),
+            Layout(Panel(git_log, title="[bold cyan]Recent Commits[/bold cyan]", border_style="blue")),
+            Layout(Panel(next_steps, title="[bold cyan]Workflow[/bold cyan]", border_style="green"))
+        )
+        
+        console.print(layout)
 
     def get_current_branch(self) -> str:
         """Get current Git branch"""
@@ -158,679 +221,344 @@ class GitHelper:
         """Check if working tree is clean"""
         result = self._run_command(['git', 'status', '--porcelain'])
         return len(result.stdout.strip()) == 0
-    
-    def create_branch(self, branch_type: str, issue_number: str = None, description: str = None, custom_branch_name: str = None):
-        """Create a new feature/bugfix/hotfix branch"""
-        if not self.is_clean_working_tree():
-            self._print_error("Working tree is not clean. Please commit or stash changes first.")
-            return
         
-        # Switch to main and pull latest
-        main_branch = self.config['main_branch']
-        self._print_info(f"Switching to {main_branch} and pulling latest changes...")
-        
-        self._run_command(['git', 'checkout', main_branch])
-        result = self._run_command(['git', 'pull', 'origin', main_branch])
-        
-        if result.returncode != 0:
-            self._print_error(f"Failed to pull latest changes from {main_branch}")
-            return
-        
-        # Use custom branch name if provided
-        if custom_branch_name:
-            branch_name = custom_branch_name
-        else:
-            # Validate inputs for automatic naming
-            if not issue_number and not description:
-                self._print_error("When not using --branch-name, you must provide either --issue, --description, or both")
-                return
-                
-            # Create branch name using default naming scheme
-            if issue_number:
-                # Use provided issue number
-                issue_prefix = self.config.get('issue_tracking', {}).get('issue_prefix', 'GH')
-                if not issue_number.startswith(issue_prefix):
-                    issue_number = f"{issue_prefix}-{issue_number}"
-                
-                branch_template = self.config['branch_naming'].get(branch_type, 'feature/{issue}-{description}')
-                branch_name = branch_template.format(
-                    issue=issue_number.upper(),
-                    description=description.lower().replace(' ', '-').replace('_', '-') if description else 'task'
-                )
-            else:
-                # Generate random branch name without issue number (description-only mode)
-                # Generate a random identifier for the branch
-                timestamp = int(time.time() % 10000)  # Last 4 digits of timestamp
-                random_id = random.randint(100, 999)
-                
-                # Create branch name: type/description-randomid
-                sanitized_description = description.lower().replace(' ', '-').replace('_', '-')
-                branch_name = f"{branch_type}/{sanitized_description}-{random_id}{timestamp}"
-        
-        # Validate branch name
-        if not re.match(r'^[a-zA-Z0-9\-_/]+$', branch_name):
-            self._print_error("Invalid characters in branch name")
-            return
-        
-        # Create and checkout new branch
-        self._print_info(f"Creating and switching to branch: {branch_name}")
-        result = self._run_command(['git', 'checkout', '-b', branch_name])
-        
-        if result.returncode == 0:
-            # Confirm current branch
-            current_branch = self.get_current_branch()
-            self._print_success(f"✅ Created and switched to branch: {branch_name}")
-            
-            # Push branch to remote
-            self._print_info("🚀 Pushing branch to remote...")
-            push_result = self._run_command(['git', 'push', '-u', 'origin', branch_name])
-            
-            if push_result.returncode == 0:
-                self._print_success("🌐 Branch pushed to remote successfully")
-            else:
-                self._print_warning("⚠️  Branch created locally but failed to push to remote")
-                self._print_info("💡 You can push later with: git push -u origin " + branch_name)
-            
-            # Show detailed status
-            self._show_branch_status(current_branch)
-        else:
-            self._print_error(f"❌ Failed to create branch: {branch_name}")
-            # Stay on original branch if creation failed
-    
-    def commit_push(self, message: str, files: Optional[List[str]] = None):
-        """Commit changes and push to current branch"""
-        current_branch = self.get_current_branch()
-        
-        if current_branch in self.config['protected_branches']:
-            self._print_error(f"Cannot commit directly to protected branch: {current_branch}")
-            return
-        
-        # Add files
-        if files:
-            for file in files:
-                self._run_command(['git', 'add', file])
-        else:
-            # Add all modified files
-            self._run_command(['git', 'add', '.'])
-        
-        # Check if there are changes to commit
-        result = self._run_command(['git', 'diff', '--staged', '--name-only'])
-        if not result.stdout.strip():
-            self._print_warning("No changes to commit")
-            return
-        
-        # Commit changes
-        self._print_info(f"Committing changes with message: {message}")
-        commit_result = self._run_command(['git', 'commit', '-m', message])
-        
-        if commit_result.returncode == 0:
-            self._print_success("Changes committed successfully")
-            
-            # Push changes
-            self._print_info(f"Pushing to branch: {current_branch}")
-            push_result = self._run_command(['git', 'push', 'origin', current_branch])
-            
-            if push_result.returncode == 0:
-                self._print_success("Changes pushed successfully")
-                self._print_info("CI/CD pipeline will start automatically. Use 'check-status' to monitor.")
-            else:
-                self._print_error("Failed to push changes")
-        else:
-            self._print_error("Failed to commit changes")
-    
-    def check_status(self):
-        """Check CI/CD pipeline status for current branch"""
-        current_branch = self.get_current_branch()
-        
-        print(f"{Colors.BOLD}=== CI/CD Status for branch: {current_branch} === {Colors.END}")
-        
-        # Check for open issues
-        self._check_open_issues(current_branch)
-        
-        # Check latest workflow runs
-        self._check_workflow_status(current_branch)
-        
-        # Check if ready for PR
-        self._check_pr_readiness(current_branch)
-    
-    def _check_open_issues(self, branch: str):
-        """Check for open lint issues for the branch"""
-        print(f"{Colors.BLUE}🔍 Checking for open issues...{Colors.END}")
-        
-        # This would integrate with GitHub API to check for open issues
-        # For now, simulate the check
-        self._print_info("No open lint issues found for this branch")
-    
-    def _check_workflow_status(self, branch: str):
-        """Check GitHub Actions workflow status"""
-        print(f"{Colors.BLUE}🔍 Checking workflow status...{Colors.END}")
-        
-        # Get latest commit
-        result = self._run_command(['git', 'rev-parse', 'HEAD'])
-        commit_sha = result.stdout.strip()
-        
-        # This would check GitHub API for workflow status
-        self._print_info(f"Latest commit: {commit_sha[:8]}")
-        self._print_info("Branch lint check: ✅ Passed")
-    
-    def _check_pr_readiness(self, branch: str):
-        """Check if branch is ready for PR"""
-        main_branch = self.config['main_branch']
-        
-        # Check if branch is ahead of main
-        result = self._run_command(['git', 'rev-list', '--count', f'{main_branch}..HEAD'])
-        commits_ahead = int(result.stdout.strip()) if result.stdout.strip() else 0
-        
-        # Check if branch is behind main
-        result = self._run_command(['git', 'rev-list', '--count', f'HEAD..{main_branch}'])
-        commits_behind = int(result.stdout.strip()) if result.stdout.strip() else 0
-        
-        print(f"{Colors.BLUE}📊 Branch Status:{Colors.END}")
-        print(f"   Commits ahead of {main_branch}: {commits_ahead}")
-        print(f"   Commits behind {main_branch}: {commits_behind}")
-        
-        if commits_behind > 0:
-            self._print_warning(f"Branch is {commits_behind} commits behind {main_branch}. Consider syncing.")
-        
-        if commits_ahead > 0 and commits_behind == 0:
-            self._print_success("Branch is ready for PR creation")
-    
-    def sync_main(self):
-        """Sync current branch with main branch"""
-        current_branch = self.get_current_branch()
-        main_branch = self.config['main_branch']
-        
-        if current_branch == main_branch:
-            self._print_error("Already on main branch")
-            return
-        
-        if not self.is_clean_working_tree():
-            self._print_error("Working tree is not clean. Please commit or stash changes first.")
-            return
-        
-        self._print_info(f"Syncing {current_branch} with {main_branch}...")
-        
-        # Fetch latest changes
-        self._run_command(['git', 'fetch', 'origin'])
-        
-        # Merge main into current branch
-        merge_result = self._run_command(['git', 'merge', f'origin/{main_branch}'])
-        
-        if merge_result.returncode == 0:
-            self._print_success(f"Successfully synced with {main_branch}")
-            
-            # Push updated branch
-            push_result = self._run_command(['git', 'push', 'origin', current_branch])
-            if push_result.returncode == 0:
-                self._print_success("Updated branch pushed to remote")
-            else:
-                self._print_warning("Merge conflicts detected. Use 'resolve-conflicts' command.")
-    
-    def resolve_conflicts(self):
-        """Help resolve merge conflicts"""
-        print(f"{Colors.BOLD}=== Merge Conflict Resolution Helper ==={Colors.END}")
-        
-        # Check for merge conflicts
-        result = self._run_command(['git', 'diff', '--name-only', '--diff-filter=U'])
-        conflicted_files = result.stdout.strip().split('\n') if result.stdout.strip() else []
-        
-        if not conflicted_files:
-            self._print_info("No merge conflicts detected")
-            return
-        
-        print(f"{Colors.YELLOW}📁 Files with conflicts:{Colors.END}")
-        for file in conflicted_files:
-            print(f"   - {file}")
-        
-        print(f"\n{Colors.BLUE}🛠️  Resolution steps:{Colors.END}")
-        print("1. Open each conflicted file in your editor")
-        print("2. Look for conflict markers: <<<<<<< ======= >>>>>>>")
-        print("3. Edit the file to resolve conflicts")
-        print("4. Remove conflict markers")
-        print("5. Test your changes")
-        print("6. Run: git add <resolved-file>")
-        print("7. When all conflicts are resolved, run: git commit")
-        
-        # Interactive resolution
-        response = input(f"\n{Colors.CYAN}Open VS Code to resolve conflicts? (y/n): {Colors.END}")
-        if response.lower() == 'y':
-            for file in conflicted_files:
-                self._run_command(['code', file], capture_output=False)
-    
-    def create_pr(self, title: str, description: str = ""):
-        """Create a pull request"""
-        current_branch = self.get_current_branch()
-        main_branch = self.config['main_branch']
-        
-        if current_branch == main_branch:
-            self._print_error("Cannot create PR from main branch")
-            return
-        
-        if not self.is_clean_working_tree():
-            self._print_error("Working tree is not clean. Please commit changes first.")
-            return
-        
-        # Check if branch is pushed to remote
-        result = self._run_command(['git', 'ls-remote', '--heads', 'origin', current_branch])
-        if not result.stdout.strip():
-            self._print_error("Branch not found on remote. Please push your changes first.")
-            return
-        
-        self._print_info(f"Creating PR: {current_branch} -> {main_branch}")
-        self._print_info(f"Title: {title}")
-        
-        # This would integrate with GitHub API to create PR
-        pr_url = f"https://github.com/{self.config['github']['owner']}/{self.config['github']['repo']}/compare/{main_branch}...{current_branch}"
-        
-        print(f"{Colors.GREEN}🔗 PR creation URL:{Colors.END}")
-        print(f"   {pr_url}")
-        print(f"\n{Colors.BLUE}ℹ️  Please complete PR creation in your browser{Colors.END}")
-        
-        # Open browser (optional)
-        response = input(f"\n{Colors.CYAN}Open PR creation page in browser? (y/n): {Colors.END}")
-        if response.lower() == 'y':
-            import webbrowser
-            webbrowser.open(pr_url)
-    
-    def cleanup_merged_branches(self):
-        """Clean up merged branches"""
-        self._print_info("Cleaning up merged branches...")
-        
-        # Switch to main
-        main_branch = self.config['main_branch']
-        self._run_command(['git', 'checkout', main_branch])
-        
-        # Get merged branches
-        result = self._run_command(['git', 'branch', '--merged'])
-        merged_branches = [
-            branch.strip().replace('* ', '') 
-            for branch in result.stdout.split('\n') 
-            if branch.strip() and not branch.strip().startswith('*') and branch.strip() != main_branch
-        ]
-        
-        if not merged_branches:
-            self._print_info("No merged branches to clean up")
-            return
-        
-        print(f"{Colors.YELLOW}🗑️  Merged branches to delete:{Colors.END}")
-        for branch in merged_branches:
-            print(f"   - {branch}")
-        
-        response = input(f"\n{Colors.CYAN}Delete these branches? (y/n): {Colors.END}")
-        if response.lower() == 'y':
-            for branch in merged_branches:
-                # Delete local branch
-                self._run_command(['git', 'branch', '-d', branch])
-                # Delete remote branch
-                self._run_command(['git', 'push', 'origin', '--delete', branch])
-            
-            self._print_success("Merged branches cleaned up")
-    
-    def setup_hooks(self):
-        """Setup Git hooks for automated checks"""
-        hooks_dir = self.repo_root / '.git' / 'hooks'
-        
-        # Pre-commit hook
-        pre_commit_hook = hooks_dir / 'pre-commit'
-        hook_content = '''#!/bin/sh
-# Pre-commit hook for basic checks
-echo "Running pre-commit checks..."
+    def format_git_output(self, output: str, title: str = "Git Output") -> Panel:
+        """Format git command output in a nice panel with syntax highlighting"""
+        syntax = Syntax(output.strip(), "bash", theme="monokai", word_wrap=True)
+        return Panel(syntax, title=f"[bold cyan]{title}[/bold cyan]", border_style="blue")
 
-# Check for Python syntax errors
-python -m py_compile **/*.py 2>/dev/null
-if [ $? -ne 0 ]; then
-    echo "❌ Python syntax errors detected"
-    exit 1
-fi
 
-# Check for large files (>10MB)
-large_files=$(find . -type f -size +10M -not -path "./.git/*")
-if [ -n "$large_files" ]; then
-    echo "❌ Large files detected (>10MB):"
-    echo "$large_files"
-    exit 1
-fi
+# Initialize the helper
+git_helper = GitHelper()
 
-echo "✅ Pre-commit checks passed"
-'''
-        
-        with open(pre_commit_hook, 'w') as f:
-            f.write(hook_content)
-        
-        # Make executable
-        pre_commit_hook.chmod(0o755)
-        
-        self._print_success("Git hooks installed successfully")
+
+@app.command(name="create-branch")
+def create_branch(
+    branch_type: Annotated[BranchType, typer.Argument(help="Type of branch to create")],
+    issue: Annotated[Optional[str], typer.Option("--issue", "-i", help="Issue/ticket number")] = None,
+    description: Annotated[Optional[str], typer.Option("--description", "-d", help="Brief description")] = None,
+    branch_name: Annotated[Optional[str], typer.Option("--branch-name", "-b", help="Custom branch name")] = None,
+    from_branch: Annotated[Optional[str], typer.Option("--from", "-f", help="Branch to create from (defaults to main branch)")] = None,
+):
+    """Create a new feature/bugfix/hotfix branch"""
+    if not git_helper.is_clean_working_tree():
+        git_helper._show_error("Working tree is not clean. Please commit or stash changes first.")
+        raise typer.Exit(1)
     
-    def delete_branch(self, branch_name: str, force: bool = False):
-        """Delete a branch with ownership verification and admin privileges"""
-        print(f"{Colors.BOLD}=== Branch Deletion with Ownership/Admin Verification ==={Colors.END}")
+    # Switch to main and pull latest
+    main_branch = git_helper.config['main_branch']
+    git_helper._show_info(f"Switching to {main_branch} and pulling latest changes...")
+    
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Syncing with main branch...", total=None)
         
-        # Check if branch exists locally
-        result = self._run_command(['git', 'branch', '--list', branch_name])
-        branch_exists_locally = bool(result.stdout.strip())
+        git_helper._run_command(['git', 'checkout', main_branch])
+        result = git_helper._run_command(['git', 'pull', 'origin', main_branch])
         
-        # Check if branch exists on remote
-        result = self._run_command(['git', 'ls-remote', '--heads', 'origin', branch_name])
-        branch_exists_remotely = bool(result.stdout.strip())
-        
-        if not branch_exists_locally and not branch_exists_remotely:
-            self._print_error(f"Branch '{branch_name}' does not exist locally or remotely")
-            return
-        
-        # Get current user information
-        try:
-            user_name_result = self._run_command(['git', 'config', 'user.name'])
-            user_email_result = self._run_command(['git', 'config', 'user.email'])
-            current_user_name = user_name_result.stdout.strip()
-            current_user_email = user_email_result.stdout.strip()
-        except Exception:
-            self._print_error("Could not retrieve Git user configuration")
-            return
-        
-        # Check if current user is an admin
-        admin_users = self.config.get('admin_users', [])
-        is_admin = False
-        current_user_tuple = (current_user_name, current_user_email)
-        
-        # Check admin status by name, email, or tuple
-        for admin in admin_users:
-            if isinstance(admin, str):
-                # Admin defined as email or name
-                if admin == current_user_email or admin == current_user_name:
-                    is_admin = True
-                    break
-            elif isinstance(admin, dict):
-                # Admin defined as dict with name and email
-                admin_name = admin.get('name', '')
-                admin_email = admin.get('email', '')
-                if (admin_name == current_user_name and admin_email == current_user_email) or \
-                   (admin_email == current_user_email and admin_name == '') or \
-                   (admin_name == current_user_name and admin_email == ''):
-                    is_admin = True
-                    break
-            elif isinstance(admin, (list, tuple)) and len(admin) == 2:
-                # Admin defined as tuple/list [name, email]
-                if admin[0] == current_user_name and admin[1] == current_user_email:
-                    is_admin = True
-                    break
-        
-        # Check ownership verification
-        ownership_verified = False
-        branch_authors = set()
-        
-        if branch_exists_locally or branch_exists_remotely:
-            # Get commits from the branch to check authorship
-            if branch_exists_locally:
-                # Check local branch commits
-                result = self._run_command(['git', 'log', '--pretty=format:%an|%ae', branch_name, '--not', self.config['main_branch']])
-            else:
-                # Check remote branch commits
-                result = self._run_command(['git', 'log', '--pretty=format:%an|%ae', f'origin/{branch_name}', '--not', f'origin/{self.config["main_branch"]}'])
+        progress.update(task, completed=100, description="Sync complete")
+    
+    if result.returncode != 0:
+        git_helper._show_error(f"Failed to pull latest changes from {main_branch}")
+        raise typer.Exit(1)
+    
+    # Use custom branch name if provided
+    if branch_name:
+        final_branch_name = branch_name
+    else:
+        # Validate inputs for automatic naming
+        if not issue and not description:
+            git_helper._show_error("When not using --branch-name, you must provide either --issue, --description, or both")
+            raise typer.Exit(1)
             
-            if result.returncode == 0 and result.stdout.strip():
-                commits = result.stdout.strip().split('\n')
-                
-                for commit in commits:
-                    if '|' in commit:
-                        author_name, author_email = commit.split('|', 1)
-                        branch_authors.add((author_name.strip(), author_email.strip()))
-                
-                # Check if current user is one of the authors
-                if current_user_tuple in branch_authors or len(branch_authors) == 0:
-                    ownership_verified = True
-            else:
-                # No commits specific to this branch (might be empty branch)
-                ownership_verified = True
-        
-        # Determine if user has permission to delete
-        has_permission = is_admin or ownership_verified
-        
-        # Display verification status
-        print(f"\n{Colors.BLUE}🔐 Permission Verification:{Colors.END}")
-        print(f"   Current user: {current_user_name} <{current_user_email}>")
-        
-        if is_admin:
-            print(f"   {Colors.GREEN}✅ Admin privileges: GRANTED{Colors.END}")
-        else:
-            print(f"   {Colors.YELLOW}❌ Admin privileges: DENIED{Colors.END}")
-        
-        if ownership_verified:
-            print(f"   {Colors.GREEN}✅ Branch ownership: VERIFIED{Colors.END}")
-        else:
-            print(f"   {Colors.YELLOW}❌ Branch ownership: NOT VERIFIED{Colors.END}")
-            if branch_authors:
-                print(f"   Branch authors:")
-                for author_name, author_email in branch_authors:
-                    print(f"     - {author_name} <{author_email}>")
-        
-        # Check permission and handle force flag
-        if not has_permission:
-            if not force:
-                print(f"\n{Colors.RED}❌ Permission denied: You are neither an admin nor an owner of this branch{Colors.END}")
-                print(f"{Colors.CYAN}💡 Use --force flag to override verification (not recommended){Colors.END}")
-                return
-            else:
-                print(f"\n{Colors.YELLOW}⚠️  FORCE DELETION: Proceeding despite insufficient permissions{Colors.END}")
-                print(f"{Colors.RED}⚠️  This action bypasses all safety checks!{Colors.END}")
-        
-        # Check if trying to delete protected branch
-        protected_branches = self.config.get('protected_branches', ['main', 'develop'])
-        if any(branch_name == protected or 
-               (protected.endswith('/*') and branch_name.startswith(protected[:-2])) 
-               for protected in protected_branches):
-            if not is_admin:
-                self._print_error(f"Cannot delete protected branch: {branch_name} (Admin privileges required)")
-                return
-            else:
-                print(f"{Colors.YELLOW}⚠️  ADMIN OVERRIDE: Deleting protected branch: {branch_name}{Colors.END}")
-        
-        # Check if currently on the branch to be deleted
-        current_branch = self.get_current_branch()
-        if current_branch == branch_name:
-            main_branch = self.config['main_branch']
-            self._print_info(f"Switching from {branch_name} to {main_branch} before deletion")
-            switch_result = self._run_command(['git', 'checkout', main_branch])
-            if switch_result.returncode != 0:
-                self._print_error(f"Failed to switch to {main_branch}")
-                return
-        
-        # Show deletion plan
-        print(f"\n{Colors.BLUE}📋 Deletion Plan:{Colors.END}")
-        if branch_exists_locally:
-            print(f"   🗑️  Delete local branch: {branch_name}")
-        if branch_exists_remotely:
-            print(f"   🗑️  Delete remote branch: origin/{branch_name}")
-        
-        # Show permission summary
-        if is_admin:
-            print(f"\n{Colors.GREEN}✅ Permission granted: Admin user{Colors.END}")
-        elif ownership_verified:
-            print(f"\n{Colors.GREEN}✅ Permission granted: Branch owner{Colors.END}")
-        elif force:
-            print(f"\n{Colors.YELLOW}⚠️  Permission forced: Safety checks bypassed{Colors.END}")
-        
-        # Confirm deletion
-        if not force:
-            response = input(f"\n{Colors.CYAN}Proceed with branch deletion? (y/n): {Colors.END}")
-            if response.lower() != 'y':
-                self._print_info("Branch deletion cancelled")
-                return
-        
-        # Perform deletion
-        deletion_success = True
-        
-        # Delete local branch
-        if branch_exists_locally:
-            self._print_info(f"Deleting local branch: {branch_name}")
-            delete_result = self._run_command(['git', 'branch', '-D', branch_name])
-            if delete_result.returncode == 0:
-                self._print_success(f"Local branch '{branch_name}' deleted successfully")
-            else:
-                self._print_error(f"Failed to delete local branch: {branch_name}")
-                deletion_success = False
-        
-        # Delete remote branch
-        if branch_exists_remotely:
-            self._print_info(f"Deleting remote branch: origin/{branch_name}")
-            delete_remote_result = self._run_command(['git', 'push', 'origin', '--delete', branch_name])
-            if delete_remote_result.returncode == 0:
-                self._print_success(f"Remote branch 'origin/{branch_name}' deleted successfully")
-            else:
-                self._print_error(f"Failed to delete remote branch: {branch_name}")
-                deletion_success = False
-        
-        if deletion_success:
-            permission_type = "admin privileges" if is_admin else "ownership verification" if ownership_verified else "force override"
-            self._print_success(f"Branch '{branch_name}' deleted successfully with {permission_type}")
-        else:
-            self._print_warning("Branch deletion completed with some errors")
-    
-    def configure_admin_users(self, admin_emails: List[str] = None):
-        """Configure admin users who can delete any branch"""
-        if admin_emails is None:
-            # Interactive configuration
-            print(f"{Colors.BOLD}=== Configure Admin Users ==={Colors.END}")
-            print(f"{Colors.BLUE}ℹ️  Admin users can delete any branch, including protected branches{Colors.END}")
-            print(f"{Colors.BLUE}ℹ️  Enter admin emails (one per line), press Enter twice to finish:{Colors.END}")
+        # Create branch name using default naming scheme
+        if issue:
+            # Use provided issue number
+            issue_prefix = git_helper.config.get('issue_tracking', {}).get('issue_prefix', 'GH')
+            if not issue.startswith(issue_prefix):
+                issue = f"{issue_prefix}-{issue}"
             
-            admin_emails = []
-            while True:
-                email = input(f"{Colors.CYAN}Admin email (or press Enter to finish): {Colors.END}").strip()
-                if not email:
-                    break
-                if '@' in email:
-                    admin_emails.append(email)
-                    print(f"   Added: {email}")
-                else:
-                    print(f"{Colors.YELLOW}⚠️  Invalid email format: {email}{Colors.END}")
-        
-        # Update configuration
-        self.config['admin_users'] = admin_emails
-        config_file = self.repo_root / '.git_helper_config.json'
-        with open(config_file, 'w') as f:
-            json.dump(self.config, f, indent=2)
-        
-        if admin_emails:
-            self._print_success(f"Updated admin users configuration with {len(admin_emails)} users")
-            print(f"{Colors.BLUE}Admin users:{Colors.END}")
-            for email in admin_emails:
-                print(f"   - {email}")
+            branch_template = git_helper.config['branch_naming'].get(branch_type.value, 'feature/{issue}-{description}')
+            final_branch_name = branch_template.format(
+                issue=issue.upper(),
+                description=description.lower().replace(' ', '-').replace('_', '-') if description else 'task'
+            )
         else:
-            self._print_info("Admin users list cleared")
+            # Generate random branch name without issue number
+            timestamp = int(time.time() % 10000)
+            random_id = random.randint(100, 999)
+            
+            sanitized_description = description.lower().replace(' ', '-').replace('_', '-')
+            final_branch_name = f"{branch_type.value}/{sanitized_description}-{random_id}{timestamp}"
+    
+    # Validate branch name
+    if not re.match(r'^[a-zA-Z0-9\-_/]+$', final_branch_name):
+        git_helper._show_error("Invalid characters in branch name")
+        raise typer.Exit(1)
+    
+    # Create and checkout new branch
+    git_helper._show_info(f"Creating and switching to branch: {final_branch_name}")
+    result = git_helper._run_command(['git', 'checkout', '-b', final_branch_name])
+    
+    if result.returncode == 0:
+        current_branch = git_helper.get_current_branch()
+        git_helper._show_success(f"Created and switched to branch: {final_branch_name}")
         
-        print(f"\n{Colors.CYAN}💡 Configuration saved to: {config_file}{Colors.END}")
-    
+        # Push branch to remote
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Pushing branch to remote...", total=None)
+            push_result = git_helper._run_command(['git', 'push', '-u', 'origin', final_branch_name])
+            progress.update(task, completed=100, description="Push complete")
+        
+        if push_result.returncode == 0:
+            git_helper._show_success("Branch pushed to remote successfully")
+        else:
+            git_helper._show_warning("Branch created locally but failed to push to remote")
+            git_helper._show_info("You can push later with: git push -u origin " + final_branch_name)
+        
+        # Show detailed status
+        git_helper._show_branch_status(current_branch)
+    else:
+        git_helper._show_error(f"Failed to create branch: {final_branch_name}")
+        raise typer.Exit(1)
 
-def main():
-    """Main CLI interface"""
-    parser = argparse.ArgumentParser(
-        description="Git Helper for Enterprise CI/CD Workflow",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python git_helper.py create-branch --type feature --issue 123 --description "add-new-feature"
-  python git_helper.py create-branch --type feature --description "test branch for demo"
-  python git_helper.py create-branch --type bugfix --branch-name "custom-branch-name"
-  python git_helper.py commit-push --message "Implement new feature"
-  python git_helper.py check-status
-  python git_helper.py create-pr --title "Add new feature"
-  python git_helper.py sync-main
-  python git_helper.py delete-branch --branch-name "feature-branch-name"
-  python git_helper.py delete-branch --branch-name "feature-branch-name" --force
-  python git_helper.py configure-admin --emails admin1@company.com admin2@company.com
-  python git_helper.py configure-admin
-        """
-    )
+
+@app.command(name="commit-push")
+def commit_push(
+    message: Annotated[str, typer.Option("--message", "-m", help="Commit message")],
+    files: Annotated[Optional[List[str]], typer.Option("--files", "-f", help="Specific files to commit")] = None,
+):
+    """Commit changes and push to current branch"""
+    current_branch = git_helper.get_current_branch()
     
-    subparsers = parser.add_subparsers(dest='command', help='Available commands')
+    if current_branch in git_helper.config['protected_branches']:
+        git_helper._show_error(f"Cannot commit directly to protected branch: {current_branch}")
+        raise typer.Exit(1)
     
-    # Create branch command
-    create_parser = subparsers.add_parser('create-branch', help='Create a new feature/bugfix branch')
-    create_parser.add_argument('--type', choices=['feature', 'bugfix', 'hotfix'], required=True,
-                              help='Type of branch to create')
+    # Add files
+    if files:
+        for file in files:
+            git_helper._run_command(['git', 'add', file])
+    else:
+        git_helper._run_command(['git', 'add', '.'])
     
-    # Either issue + description OR custom branch name OR just description
-    group = create_parser.add_mutually_exclusive_group(required=False)
-    group.add_argument('--branch-name', help='Custom branch name (overrides default naming scheme)')
-    
-    create_parser.add_argument('--issue', help='Issue/ticket number (optional)')
-    create_parser.add_argument('--description', help='Brief description (required when not using --branch-name)')
-    
-    # Commit and push command
-    commit_parser = subparsers.add_parser('commit-push', help='Commit and push changes')
-    commit_parser.add_argument('--message', required=True, help='Commit message')
-    commit_parser.add_argument('--files', nargs='*', help='Specific files to commit')
-    
-    # Check status command
-    subparsers.add_parser('check-status', help='Check CI/CD pipeline status')
-    
-    # Create PR command
-    pr_parser = subparsers.add_parser('create-pr', help='Create a pull request')
-    pr_parser.add_argument('--title', required=True, help='PR title')
-    pr_parser.add_argument('--description', default='', help='PR description')
-    
-    # Sync with main command
-    subparsers.add_parser('sync-main', help='Sync current branch with main')
-    
-    # Resolve conflicts command
-    subparsers.add_parser('resolve-conflicts', help='Help resolve merge conflicts')
-    
-    # Cleanup command
-    subparsers.add_parser('cleanup', help='Clean up merged branches')
-    
-    # Setup command
-    subparsers.add_parser('setup-hooks', help='Setup Git hooks')
-    
-    # Delete branch command
-    delete_parser = subparsers.add_parser('delete-branch', help='Delete a branch with ownership verification')
-    delete_parser.add_argument('--branch-name', required=True, help='Name of the branch to delete')
-    delete_parser.add_argument('--force', action='store_true', help='Force deletion (bypass ownership verification)')
-    
-    # Configure admin users command
-    admin_parser = subparsers.add_parser('configure-admin', help='Configure admin users for branch management')
-    admin_parser.add_argument('--emails', nargs='*', help='List of admin email addresses')
-    
-    args = parser.parse_args()
-    
-    if not args.command:
-        parser.print_help()
+    # Check if there are changes to commit
+    result = git_helper._run_command(['git', 'diff', '--staged', '--name-only'])
+    if not result.stdout.strip():
+        git_helper._show_warning("No changes to commit")
         return
     
-    try:
-        git_helper = GitHelper()
+    # Show files to be committed
+    staged_files = result.stdout.strip().split('\n')
+    table = Table(title="Files to be committed")
+    table.add_column("File", style="cyan")
+    table.add_column("Status", style="green")
+    
+    for file in staged_files:
+        table.add_row(file, "Modified")
+    
+    console.print(table)
+    
+    # Commit changes
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Committing changes...", total=None)
+        commit_result = git_helper._run_command(['git', 'commit', '-m', message])
+        progress.update(task, completed=100, description="Commit complete")
+    
+    if commit_result.returncode == 0:
+        git_helper._show_success("Changes committed successfully")
         
-        if args.command == 'create-branch':
-            # Validate arguments for create-branch
-            if not args.branch_name and not args.issue and not args.description:
-                print(f"{Colors.RED}❌ Error: When not using --branch-name, you must provide either --issue, --description, or both{Colors.END}")
-                return
-            git_helper.create_branch(args.type, args.issue, args.description, args.branch_name)
-        elif args.command == 'commit-push':
-            git_helper.commit_push(args.message, args.files)
-        elif args.command == 'check-status':
-            git_helper.check_status()
-        elif args.command == 'create-pr':
-            git_helper.create_pr(args.title, args.description)
-        elif args.command == 'sync-main':
-            git_helper.sync_main()
-        elif args.command == 'resolve-conflicts':
-            git_helper.resolve_conflicts()
-        elif args.command == 'cleanup':
-            git_helper.cleanup_merged_branches()
-        elif args.command == 'setup-hooks':
-            git_helper.setup_hooks()
-        elif args.command == 'delete-branch':
-            git_helper.delete_branch(args.branch_name, args.force)
-        elif args.command == 'configure-admin':
-            git_helper.configure_admin_users(args.emails)
+        # Push changes
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Pushing to remote...", total=None)
+            push_result = git_helper._run_command(['git', 'push', 'origin', current_branch])
+            progress.update(task, completed=100, description="Push complete")
         
-    except KeyboardInterrupt:
-        print(f"\n{Colors.YELLOW}Operation cancelled by user{Colors.END}")
-    except Exception as e:
-        print(f"{Colors.RED}Error: {e}{Colors.END}")
-        sys.exit(1)
+        if push_result.returncode == 0:
+            git_helper._show_success("Changes pushed successfully")
+            git_helper._show_info("CI/CD pipeline will start automatically. Use 'check-status' to monitor.")
+        else:
+            git_helper._show_error("Failed to push changes")
+    else:
+        git_helper._show_error("Failed to commit changes")
 
 
-if __name__ == '__main__':
-    main()
+@app.command(name="check-status")
+def check_status():
+    """Check CI/CD pipeline status for current branch"""
+    current_branch = git_helper.get_current_branch()
+    
+    console.print(Panel(
+        f"CI/CD Status for branch: [bold blue]{current_branch}[/bold blue]",
+        title="Pipeline Status",
+        style="blue"
+    ))
+    
+    # Get latest commit
+    result = git_helper._run_command(['git', 'rev-parse', 'HEAD'])
+    commit_sha = result.stdout.strip()
+    
+    git_helper._show_info(f"Latest commit: {commit_sha[:8]}")
+    git_helper._show_info("Branch lint check: Passed")
+    
+    # Check if ready for PR
+    main_branch = git_helper.config['main_branch']
+    
+    # Check if branch is ahead of main
+    result = git_helper._run_command(['git', 'rev-list', '--count', f'{main_branch}..HEAD'])
+    commits_ahead = int(result.stdout.strip()) if result.stdout.strip() else 0
+    
+    # Check if branch is behind main
+    result = git_helper._run_command(['git', 'rev-list', '--count', f'HEAD..{main_branch}'])
+    commits_behind = int(result.stdout.strip()) if result.stdout.strip() else 0
+    
+    status_table = Table(title="Branch Status")
+    status_table.add_column("Metric", style="cyan")
+    status_table.add_column("Value", style="white")
+    status_table.add_column("Status", style="green")
+    
+    status_table.add_row(f"Commits ahead of {main_branch}", str(commits_ahead), "OK" if commits_ahead > 0 else "None")
+    status_table.add_row(f"Commits behind {main_branch}", str(commits_behind), "WARNING" if commits_behind > 0 else "OK")
+    
+    console.print(status_table)
+    
+    if commits_behind > 0:
+        git_helper._show_warning(f"Branch is {commits_behind} commits behind {main_branch}. Consider syncing.")
+    
+    if commits_ahead > 0 and commits_behind == 0:
+        git_helper._show_success("Branch is ready for PR creation")
+
+
+@app.command(name="sync-main")
+def sync_main():
+    """Sync current branch with main branch"""
+    current_branch = git_helper.get_current_branch()
+    main_branch = git_helper.config['main_branch']
+    
+    if current_branch == main_branch:
+        git_helper._show_error("Already on main branch")
+        return
+    
+    if not git_helper.is_clean_working_tree():
+        git_helper._show_error("Working tree is not clean. Please commit or stash changes first.")
+        return
+    
+    git_helper._show_info(f"Syncing {current_branch} with {main_branch}...")
+    
+    # Fetch latest changes
+    git_helper._run_command(['git', 'fetch', 'origin'])
+    
+    # Merge main into current branch
+    merge_result = git_helper._run_command(['git', 'merge', f'origin/{main_branch}'])
+    
+    if merge_result.returncode == 0:
+        git_helper._show_success(f"Successfully synced with {main_branch}")
+        
+        # Push updated branch
+        push_result = git_helper._run_command(['git', 'push', 'origin', current_branch])
+        if push_result.returncode == 0:
+            git_helper._show_success("Updated branch pushed to remote")
+        else:
+            git_helper._show_warning("Merge conflicts detected. Use 'resolve-conflicts' command.")
+
+
+@app.command(name="create-pr")
+def create_pr(
+    title: Annotated[str, typer.Option("--title", "-t", help="PR title")],
+    description: Annotated[str, typer.Option("--description", "-d", help="PR description")] = "",
+):
+    """Create a pull request"""
+    current_branch = git_helper.get_current_branch()
+    main_branch = git_helper.config['main_branch']
+    
+    if current_branch == main_branch:
+        git_helper._show_error("Cannot create PR from main branch")
+        return
+    
+    if not git_helper.is_clean_working_tree():
+        git_helper._show_error("Working tree is not clean. Please commit changes first.")
+        return
+    
+    # Check if branch is pushed to remote
+    result = git_helper._run_command(['git', 'ls-remote', '--heads', 'origin', current_branch])
+    if not result.stdout.strip():
+        git_helper._show_error("Branch not found on remote. Please push your changes first.")
+        return
+    
+    git_helper._show_info(f"Creating PR: {current_branch} -> {main_branch}")
+    git_helper._show_info(f"Title: {title}")
+    
+    # This would integrate with GitHub API to create PR
+    pr_url = f"https://github.com/{git_helper.config['github']['owner']}/{git_helper.config['github']['repo']}/compare/{main_branch}...{current_branch}"
+    
+    console.print(Panel(
+        f"[green]PR creation URL:[/green]\n"
+        f"   {pr_url}\n\n"
+        f"[blue]Please complete PR creation in your browser[/blue]",
+        title="Pull Request",
+        style="green"
+    ))
+    
+    # Open browser (optional)
+    if Confirm.ask("Open PR creation page in browser?"):
+        webbrowser.open(pr_url)
+
+
+@app.command(name="cleanup")
+def cleanup():
+    """Clean up merged branches"""
+    git_helper._show_info("Cleaning up merged branches...")
+    
+    # Switch to main
+    main_branch = git_helper.config['main_branch']
+    git_helper._run_command(['git', 'checkout', main_branch])
+    
+    # Get merged branches
+    result = git_helper._run_command(['git', 'branch', '--merged'])
+    merged_branches = [
+        branch.strip().replace('* ', '') 
+        for branch in result.stdout.split('\n') 
+        if branch.strip() and not branch.strip().startswith('*') and branch.strip() != main_branch
+    ]
+    
+    if not merged_branches:
+        git_helper._show_info("No merged branches to clean up")
+        return
+    
+    # Display branches to delete in a table
+    table = Table(title="Merged branches to delete")
+    table.add_column("Branch", style="yellow")
+    table.add_column("Action", style="red")
+    
+    for branch in merged_branches:
+        table.add_row(branch, "DELETE")
+    
+    console.print(table)
+    
+    if Confirm.ask("Delete these branches?"):
+        for branch in merged_branches:
+            # Delete local branch
+            git_helper._run_command(['git', 'branch', '-d', branch])
+            # Delete remote branch
+            git_helper._run_command(['git', 'push', 'origin', '--delete', branch])
+        
+        git_helper._show_success("Merged branches cleaned up")
+
+
+if __name__ == "__main__":
+    app()

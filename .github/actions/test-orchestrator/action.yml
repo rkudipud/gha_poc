@@ -255,7 +255,7 @@ runs:
               timeout ${TIMEOUT}m bash -c "
                 echo 'Executing $TEST_NAME...'
                 case '$TEST_ID' in
-                  'python_lint_enhanced')
+                  'python_lint')
                     echo 'Running Python linting...'
                     SCORE=92
                     RESULT='pass'

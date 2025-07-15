@@ -1,0 +1,49 @@
+# Code Complexity Rule Configuration
+
+# Enable/disable this rule
+enabled: true
+
+# Rule severity level
+severity: "warning"  # Most complexity issues are warnings, not errors
+
+# Performance settings
+performance:
+  max_file_size: 2097152  # 2MB - larger files may take longer to analyze
+  parallel: true
+  cache_results: true
+
+# Rule-specific parameters
+parameters:
+  # Maximum cyclomatic complexity allowed for functions
+  max_cyclomatic_complexity: 10
+  
+  # Maximum nesting depth allowed
+  max_nesting_depth: 4
+  
+  # Maximum lines per function
+  max_function_length: 50
+  
+  # Maximum methods per class
+  max_class_methods: 20
+  
+  # Skip test files (they often have higher complexity)
+  ignore_test_files: true
+  
+  # Additional file patterns to ignore
+  ignore_patterns:
+    - "**/migrations/**"
+    - "**/vendor/**" 
+    - "**/third_party/**"
+
+# Severity overrides for specific thresholds
+severity_overrides:
+  # Critical complexity levels that become errors
+  critical_complexity: 20  # Functions with complexity > 20 are errors
+  critical_nesting: 6      # Nesting > 6 levels is an error
+  critical_function_length: 100  # Functions > 100 lines are errors
+
+# Integration settings
+integration:
+  ci_enabled: true
+  pre_commit: true
+  ide_enabled: true

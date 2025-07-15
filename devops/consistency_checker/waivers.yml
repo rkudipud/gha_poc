@@ -1,7 +1,7 @@
-# Centralized Lint and Consistency Waivers Configuration
+# Enhanced Consistency Checker Waivers Configuration
 #
-# This is the single source of truth for all waivers across CI/CD pipeline and local checks.
-# Both GitHub Actions linting and local consistency checker use this file.
+# This file demonstrates the comprehensive waiver system for the enhanced 
+# consistency checker framework with multiple waiver types and advanced features.
 
 # Global waiver settings
 settings:
@@ -15,77 +15,124 @@ settings:
   max_waivers_per_file: 10
   
   # Rules that require security team approval
-  security_critical_rules: ["S101", "S102", "B101", "B102", "B601", "B602"]
+  security_critical_rules: ["security_checks", "hardcoded_secrets"]
 
-# Rule-based waivers (applies to entire file/rule combination)
-rule_waivers:
-  - file: "src/core_module.py"
-    rule: "E501"  # Line too long
-    reason: "Core module with complex algorithms that cannot be easily refactored"
-    approved_by: "tech-lead@company.com"
-    expires: "2025-12-31"
-    issue_reference: "issue-456"
-    
-  - file: "pandora_tc_ext_fm.py"
-    rule: "F401"  # Unused import
-    reason: "Example script with multiple imports for demonstration purposes"
-    approved_by: "project-lead@company.com"
-    expires: "2025-08-31"
-
-# Line-specific waivers (applies to exact code lines)
+# Line-specific waivers (most precise waiver type)
 line_waivers:
-  # Format: Copy the exact violation line from lint output
-  - violation_line: "src/config.py:45:80: E501 line too long (120 > 79 characters)"
+  - id: "line_001"
+    violation_line: "src/config.py:45:80: line_length line too long (120 > 88 characters)"
     code_content: "DATABASE_URL = 'postgresql://user:password@very-long-hostname.example.com:5432/database_name_that_is_also_very_long'"
     reason: "Database URL cannot be broken across lines due to configuration parser limitations"
     approved_by: "senior-dev@company.com"
-    expires: "2025-06-30"
-    issue_reference: "issue-789"
+    expires: "2025-12-31"
+    issue_reference: "TICKET-789"
+    created_date: "2025-01-15"
     
-  - violation_line: "src/api/endpoints.py:78:1: F401 'logging' imported but unused"
+  - id: "line_002"
+    file_pattern: "src/api/endpoints.py"
+    line_number: 78
+    column: 1
+    pattern: "F401 'logging' imported but unused"
     code_content: "import logging  # Used in debug mode via dynamic imports"
     reason: "Import used conditionally in debug mode, removing would break debugging"
     approved_by: "api-team-lead@company.com"
     expires: "2025-08-15"
+    message_pattern: "imported but unused"
     
-  - violation_line: "pandora_tc_ext_fm.py:10:1: F401 'shutil' imported but unused"
-    code_content: "import shutil"
+  - id: "line_003"
+    file_pattern: "pandora_tc_ext_fm.py"
+    line_number: 10
+    pattern: "shutil"
     reason: "Import used in conditional code paths for file operations"
     approved_by: "project-lead@company.com"
     expires: "2025-07-31"
 
-# Bulk waivers for repeated patterns
+# Pattern-based waivers (for recurring patterns)
+pattern_waivers:
+  - id: "pattern_001"
+    pattern: "TODO"
+    file_pattern: "src/experimental/**/*.py"
+    rules: ["code_quality"]
+    reason: "Experimental code is allowed to have TODO comments during development"
+    approved_by: "research-team@company.com"
+    expires: "2025-09-30"
+    severity_filter: ["warning"]
+    
+  - id: "pattern_002"
+    pattern: "complexity"
+    file_pattern: "src/legacy/**/*.py"
+    rules: ["code_complexity"]
+    reason: "Legacy code has higher complexity during refactoring period"
+    approved_by: "tech-lead@company.com"
+    expires: "2025-06-30"
+    message_pattern: "high.*complexity"
+
+# Rule-based waivers (disable entire rules for specific scopes)
+rule_waivers:
+  - id: "rule_001"
+    rules: ["naming_conventions"]
+    file_pattern: "tests/**/*.py"
+    reason: "Test files may have descriptive function names that are longer"
+    approved_by: "qa-lead@company.com"
+    parameter_overrides:
+      max_function_name_length: 100
+      
+  - id: "rule_002"
+    rules: ["code_complexity"]
+    file_pattern: "src/migrations/**/*.py"
+    reason: "Database migration scripts can be complex and are auto-generated"
+    approved_by: "dba-team@company.com"
+    parameter_overrides:
+      max_cyclomatic_complexity: 25
+      max_function_length: 200
+
+# Bulk waivers for large-scale exemptions
 bulk_waivers:
-  # Waive all E501 in specific directories
-  - pattern: "tests/**/*.py"
-    rules: ["E501", "F841"]
-    reason: "Test files can have longer lines and unused variables for setup/teardown"
+  - id: "bulk_001"
+    pattern: "tests/**/*.py"
+    rules: ["line_length", "function_length"]
+    reason: "Test files have relaxed standards for readability"
     approved_by: "qa-lead@company.com"
     expires: "2026-01-01"
     
-  - pattern: "docs/**/*.py"
-    rules: ["E501", "F401", "W293"]
+  - id: "bulk_002"
+    pattern: "docs/**/*.py"
+    rules: ["*"]  # All rules
     reason: "Documentation code snippets should not be modified"
     approved_by: "docs-admin@company.com"
     
-  - pattern: "third_party/**/*.py"
-    rules: "*"  # All rules
+  - id: "bulk_003"
+    pattern: "third_party/**/*.py"
+    rules: ["*"]
     reason: "External code not under our control"
     approved_by: "tech-lead@company.com"
     
-  - pattern: "examples/**/*.py"
-    rules: ["F401", "E501", "W503"]
+  - id: "bulk_004"
+    pattern: "examples/**/*.py"
+    rules: ["python_imports", "line_length", "naming_conventions"]
     reason: "Example files may have relaxed standards for educational purposes"
     approved_by: "documentation-team@company.com"
     expires: "2025-12-31"
 
-# Consistency checker specific waivers
+# Temporary waivers (for short-term exemptions)
+temporary_waivers:
+  - id: "temp_001"
+    pattern: "hotfix"
+    file_pattern: "src/critical/**/*.py"
+    rules: ["code_complexity", "function_length"]
+    reason: "Emergency hotfix deployment - will be refactored in next sprint"
+    approved_by: "incident-commander@company.com"
+    expires: "2025-02-15"
+    issue_reference: "INCIDENT-001"
+
+# Modern format waivers
 consistency_waivers:
   # Python imports rule specific waivers
   python_imports:
     file_waivers:
       - pattern: "__init__.py"
         reason: "Init files may have special import patterns"
+        approved_by: "legacy-maintainer@company.com"
         
     line_waivers:
       - file: "src/module.py"
@@ -98,13 +145,49 @@ consistency_waivers:
     file_waivers:
       - pattern: "tests/**/*.py"
         reason: "Test files may have descriptive function names that are longer"
+        approved_by: "qa-lead@company.com"
         
-    pattern_waivers:
-      - file_pattern: "src/core/*"
-        message_pattern: "*should use snake_case*"
-        reason: "Core modules follow established naming conventions"
-        approved_by: "tech-lead@company.com"
-        expires: "2026-01-01"
+  # Code complexity rule specific waivers
+  code_complexity:
+    file_waivers:
+      - pattern: "src/algorithms/**/*.py"
+        reason: "Algorithm implementations may have higher complexity"
+        approved_by: "algorithms-team@company.com"
+        expires: "2025-08-31"
+
+# Conditional waivers (advanced - evaluated at runtime)
+conditional_waivers:
+  - id: "conditional_001"
+    condition: "file_size < 1000"  # Only for small files
+    pattern: "single_letter_variable"
+    rules: ["naming_conventions"]
+    reason: "Small utility files can use brief variable names"
+    approved_by: "style-committee@company.com"
+    
+  - id: "conditional_002"
+    condition: "commit_author == 'automated-tool@company.com'"
+    pattern: "*"
+    rules: ["*"]
+    reason: "Automated code generation tools exempt from manual style rules"
+    approved_by: "automation-team@company.com"
+
+# Waiver usage tracking
+tracking:
+  # Enable usage statistics
+  track_usage: true
+  
+  # Report unused waivers
+  report_unused: true
+  
+  # Warn about frequently used waivers (may indicate rule issues)
+  warn_overused_threshold: 50
+
+pattern_waivers:
+  - file_pattern: "src/core/*"
+    message_pattern: "*should use snake_case*"
+    reason: "Core modules follow established naming conventions"
+    approved_by: "tech-lead@company.com"
+    expires: "2026-01-01"
 
 # Waiver Rules and Guidelines:
 #

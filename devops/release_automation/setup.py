@@ -10,8 +10,38 @@ import sys
 import json
 import subprocess
 import re
-import argparse
 from pathlib import Path
+from typing import Annotated, Tuple, Optional, Dict, Any, List
+from datetime import datetime
+
+import typer
+from rich.console import Console
+from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+from rich.table import Table
+from rich.prompt import Confirm, Prompt
+from rich.text import Text
+from rich.tree import Tree
+from rich.syntax import Syntax
+from rich.style import Style
+from rich.markdown import Markdown
+from rich.layout import Layout
+from rich.columns import Columns
+from rich.box import Box, ROUNDED, HEAVY, SIMPLE
+from rich import print as rprint
+
+
+# Initialize Rich console
+console = Console()
+
+# Typer app with styling
+app = typer.Typer(
+    name="git-helper-setup",
+    help="Setup script for Enterprise CI/CD Git Helper",
+    rich_markup_mode="rich",
+    no_args_is_help=True,
+    add_completion=True,
+)
 
 
 def _find_repo_root() -> Path:
@@ -26,490 +56,187 @@ def _find_repo_root() -> Path:
 
 def print_banner():
     """Print setup banner"""
-    print("=" * 70)
-    print("  Enterprise CI/CD Git Helper Setup")
-    print("=" * 70)
-    print()
+    banner_text = """
+    [bold blue]Enterprise CI/CD Git Helper Setup[/bold blue]
+    
+    This tool will guide you through the setup process for the Enterprise CI/CD Git Helper.
+    The Git Helper simplifies common Git workflows and enforces best practices.
+    
+    [yellow]Please follow the prompts to complete the setup.[/yellow]
+    """
+    
+    banner = Panel(
+        Text.from_markup(banner_text),
+        border_style="blue",
+        title="[bold cyan]Welcome[/bold cyan]",
+        subtitle="[cyan]v1.0.0[/cyan]"
+    )
+    console.print(banner)
 
 
-def check_requirements():
+def check_requirements() -> bool:
     """Check system requirements"""
-    print("🔍 Checking system requirements...")
+    console.print("[cyan]Checking system requirements...[/cyan]")
+    
+    requirements_table = Table(title="System Requirements", box=ROUNDED)
+    requirements_table.add_column("Component", style="cyan")
+    requirements_table.add_column("Required", style="yellow")
+    requirements_table.add_column("Status", style="green")
+    requirements_table.add_column("Details", style="blue")
     
     # Check Python version
-    if sys.version_info < (3, 7):
-        print("❌ Python 3.7 or higher is required")
-        return False
-    
-    # Check Git
-    try:
-        subprocess.run(['git', '--version'], capture_output=True, check=True)
-        print("✅ Git is installed")
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        print("❌ Git is not installed or not in PATH")
-        return False
-    
-    # Check if in git repository
-    try:
-        subprocess.run(['git', 'rev-parse', '--git-dir'], capture_output=True, check=True)
-        print("✅ In a Git repository")
-    except subprocess.CalledProcessError:
-        print("❌ Not in a Git repository")
-        return False
-    
-    print("✅ All requirements met")
-    return True
-
-
-def create_config():
-    """Create configuration file"""
-    print("\n📝 Creating configuration file...")
-    
-    # Auto-detect GitHub info
-    print("🔍 Auto-detecting repository information...")
-    auto_owner, auto_repo = get_git_remote_info()
-    git_user, git_email = get_git_user_info()
-    
-    if auto_owner and auto_repo:
-        print(f"✅ Detected GitHub repository: {auto_owner}/{auto_repo}")
-    if git_user:
-        print(f"✅ Detected Git user: {git_user} <{git_email}>")
-    
-    config = {
-        "github": {
-            "owner": auto_owner or "",
-            "repo": auto_repo or "",
-            "token": ""
-        },
-        "branch_naming": {
-            "feature": "feature/{issue}-{description}",
-            "bugfix": "bugfix/{issue}-{description}",
-            "hotfix": "hotfix/{issue}-{description}",
-            "chore": "chore/{description}",
-            "docs": "docs/{description}"
-        },
-        "main_branch": "main",
-        "protected_branches": ["main", "develop", "release/*"],
-        "user_info": {
-            "name": git_user or "",
-            "email": git_email or ""
-        }
-    }
-    
-    # Interactive configuration
-    print("\nPlease confirm or update the following information:")
-    
-    # GitHub configuration
-    current_owner = config["github"]["owner"]
-    github_owner = input(f"GitHub repository owner [{current_owner}]: ").strip()
-    if github_owner:
-        config["github"]["owner"] = github_owner
-    elif not current_owner:
-        print("⚠️ GitHub owner is required for full functionality")
-    
-    current_repo = config["github"]["repo"]
-    github_repo = input(f"GitHub repository name [{current_repo}]: ").strip()
-    if github_repo:
-        config["github"]["repo"] = github_repo
-    elif not current_repo:
-        print("⚠️ GitHub repository name is required for full functionality")
-    
-    print("\nNote: GitHub token can be set later in the config file or as GITHUB_TOKEN environment variable")
-    
-    # Main branch
-    current_main = config["main_branch"]
-    main_branch = input(f"Main branch name [{current_main}]: ").strip()
-    if main_branch:
-        config["main_branch"] = main_branch
-    
-    # Save configuration
-    config_file = Path('.git_helper_config.json')
-    with open(config_file, 'w') as f:
-        json.dump(config, f, indent=2)
-    
-    print(f"✅ Configuration saved to {config_file}")
-    return config_file
-
-
-def install_git_helper():
-    """Install git_helper script"""
-    print("\n🔧 Installing git_helper...")
-    
-    # Get current script directory
-    script_dir = Path(__file__).parent
-    git_helper_path = script_dir / 'git_helper.py'
-    
-    if not git_helper_path.exists():
-        # Try looking in the repo root
-        repo_root = _find_repo_root()
-        alt_path = repo_root / 'devops' / 'release_automation' / 'git_helper.py'
-        if alt_path.exists():
-            git_helper_path = alt_path
-        else:
-            print("❌ git_helper.py not found in current directory or devops/release_automation")
-            return False
-    
-    # Make git_helper executable
-    git_helper_path.chmod(0o755)
-    
-    # Create symlink in user's local bin directory
-    local_bin = Path.home() / '.local' / 'bin'
-    local_bin.mkdir(parents=True, exist_ok=True)
-    
-    symlink_path = local_bin / 'git_helper'
-    
-    try:
-        if symlink_path.exists():
-            symlink_path.unlink()
-        symlink_path.symlink_to(git_helper_path.absolute())
-        print(f"✅ Created symlink: {symlink_path} -> {git_helper_path}")
-    except OSError as e:
-        print(f"⚠️ Could not create symlink: {e}")
-        print(f"You can manually run: {git_helper_path}")
-        return False
-    
-    # Check if ~/.local/bin is in PATH
-    path_dirs = os.environ.get('PATH', '').split(os.pathsep)
-    if str(local_bin) not in path_dirs:
-        print(f"\n⚠️ {local_bin} is not in your PATH")
-        print("Add this line to your shell profile (.bashrc, .zshrc, etc.):")
-        print(f'export PATH="$PATH:{local_bin}"')
-    
-    return True
-
-
-def setup_git_hooks():
-    """Setup Git hooks"""
-    print("\n🪝 Setting up Git hooks...")
-    
-    hooks_dir = Path('.git/hooks')
-    if not hooks_dir.exists():
-        print("❌ .git/hooks directory not found")
-        return False
-    
-    # Pre-commit hook
-    pre_commit_hook = hooks_dir / 'pre-commit'
-    hook_content = '''#!/bin/sh
-# Pre-commit hook for enterprise CI/CD workflow
-
-# Check if pre-commit hook is disabled via environment variable
-if [ "$DISABLE_PRECOMMIT_HOOK" = "true" ] || [ "$DISABLE_PRECOMMIT_HOOK" = "1" ]; then
-    echo "� Pre-commit hook disabled via DISABLE_PRECOMMIT_HOOK environment variable"
-    exit 0
-fi
-
-echo "�🔍 Running pre-commit checks..."
-
-# Determine the correct Python interpreter
-PYTHON_CMD=""
-if command -v python3 >/dev/null 2>&1; then
-    PYTHON_CMD="python3"
-elif command -v python >/dev/null 2>&1; then
-    PYTHON_CMD="python"
-else
-    echo "❌ No Python interpreter found"
-    exit 1
-fi
-
-# Check for Python syntax errors
-python_files=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$')
-if [ -n "$python_files" ]; then
-    for file in $python_files; do
-        if [ -f "$file" ]; then
-            $PYTHON_CMD -m py_compile "$file"
-            if [ $? -ne 0 ]; then
-                echo "❌ Python syntax error in $file"
-                exit 1
-            fi
-        fi
-    done
-fi
-
-# Check for large files (>10MB)
-large_files=$(git diff --cached --name-only | xargs -I {} find {} -type f -size +10M 2>/dev/null)
-if [ -n "$large_files" ]; then
-    echo "❌ Large files detected (>10MB):"
-    echo "$large_files"
-    echo "Consider using Git LFS for large files"
-    exit 1
-fi
-
-# Check for secrets (basic patterns)
-secrets_found=$(git diff --cached | grep -iE "(password|secret|key|token)\\s*=" | head -5)
-if [ -n "$secrets_found" ]; then
-    echo "⚠️ Potential secrets detected in commit:"
-    echo "$secrets_found"
-    echo "Please review and confirm these are not actual secrets"
-    read -p "Continue with commit? (y/N): " confirm
-    if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
-        echo "Commit cancelled"
-        exit 1
-    fi
-fi
-
-echo "✅ Pre-commit checks passed"
-'''
-    
-    with open(pre_commit_hook, 'w') as f:
-        f.write(hook_content)
-    
-    pre_commit_hook.chmod(0o755)
-    print(f"✅ Installed pre-commit hook: {pre_commit_hook}")
-    print("💡 To disable: export DISABLE_PRECOMMIT_HOOK=true")
-    
-    return True
-
-
-def create_alias():
-    """Create git alias for the helper"""
-    print("\n🔗 Creating Git alias...")
-    
-    try:
-        # Create git alias
-        subprocess.run([
-            'git', 'config', '--global', 'alias.helper', 
-            '!python git_helper.py'
-        ], check=True)
-        
-        print("✅ Created Git alias: git helper")
-        print("You can now use: git helper <command>")
-        
-    except subprocess.CalledProcessError:
-        print("⚠️ Could not create Git alias")
-        return False
-    
-    return True
-
-
-def print_usage_guide():
-    """Print usage guide"""
-    print("\n" + "=" * 70)
-    print("  Setup Complete! 🎉")
-    print("=" * 70)
-    print()
-    print("📖 Quick Start Guide:")
-    print()
-    print("1. Create a new feature branch:")
-    print("   git_helper create-branch --type feature --issue 123 --description 'add-new-feature'")
-    print("   # or: git helper create-branch --type feature --issue 123 --description 'add-new-feature'")
-    print()
-    print("2. Commit and push changes:")
-    print("   git_helper commit-push --message 'Implement new feature'")
-    print()
-    print("3. Check CI/CD status:")
-    print("   git_helper check-status")
-    print()
-    print("4. Create pull request:")
-    print("   git_helper create-pr --title 'Add new feature'")
-    print()
-    print("5. Sync with main branch:")
-    print("   git_helper sync-main")
-    print()
-    print("📁 Configuration Files:")
-    print("   .git_helper_config.json  - Main configuration")
-    print("   devops/consistency_checker/waivers.yml - Centralized waiver management")
-    print()
-    print("🔗 Useful Links:")
-    print("   Documentation: README.md (comprehensive project and DevOps guide)")
-    print("   Waiver Guidelines: devops/docs/WAIVERS.md")
-    print()
-    print("🔧 Environment Variables:")
-    print("   GITHUB_TOKEN             - GitHub personal access token")
-    print("   DISABLE_PRECOMMIT_HOOK   - Set to 'true' to disable pre-commit hook")
-    print()
-    print("💡 Tips:")
-    print("   - Use waiver mechanism sparingly and with proper approval")
-    print("   - Monitor CI/CD pipeline status regularly")
-    print("   - Keep your branches up to date with main")
-    print("   - Review and address lint issues promptly")
-    print("   - To disable pre-commit hook: export DISABLE_PRECOMMIT_HOOK=true")
-    print()
-
-
-def get_git_remote_info():
-    """Auto-detect GitHub owner and repo from Git remote"""
-    try:
-        # Get remote origin URL
-        result = subprocess.run(['git', 'remote', 'get-url', 'origin'], 
-                              capture_output=True, text=True, check=True)
-        remote_url = result.stdout.strip()
-        
-        # Parse GitHub URL patterns
-        # SSH: git@github.com:owner/repo.git
-        # HTTPS: https://github.com/owner/repo.git
-        # Extract owner and repo
-        github_pattern = r'github\.com[:/]([^/]+)/([^/.]+)(?:\.git)?'
-        match = re.search(github_pattern, remote_url)
-        
-        if match:
-            owner, repo = match.groups()
-            return owner, repo
-        else:
-            print(f"⚠️ Could not parse GitHub info from URL: {remote_url}")
-            return None, None
-            
-    except subprocess.CalledProcessError:
-        print("⚠️ Could not get Git remote origin URL")
-        return None, None
-
-
-def get_git_user_info():
-    """Get Git user information"""
-    try:
-        name_result = subprocess.run(['git', 'config', 'user.name'], 
-                                   capture_output=True, text=True, check=True)
-        email_result = subprocess.run(['git', 'config', 'user.email'], 
-                                    capture_output=True, text=True, check=True)
-        
-        return name_result.stdout.strip(), email_result.stdout.strip()
-    except subprocess.CalledProcessError:
-        return None, None
-
-
-def parse_arguments():
-    """Parse command-line arguments"""
-    parser = argparse.ArgumentParser(
-        description="Setup script for Enterprise CI/CD Git Helper",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python setup.py                    # Interactive setup
-  python setup.py --check            # Check current setup
-  python setup.py --auto             # Auto setup with defaults
-  python setup.py --no-hooks         # Setup without Git hooks
-  python setup.py --reset            # Reset configuration
-        """
+    python_ok = sys.version_info >= (3, 7)
+    python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    requirements_table.add_row(
+        "Python", 
+        "≥ 3.7", 
+        "✓" if python_ok else "✗", 
+        f"Found {python_version}"
     )
     
-    parser.add_argument('--check', action='store_true',
-                       help='Check current setup without making changes')
-    parser.add_argument('--auto', action='store_true',
-                       help='Automatic setup with detected/default values')
-    parser.add_argument('--no-hooks', action='store_true',
-                       help='Skip Git hooks installation')
-    parser.add_argument('--no-alias', action='store_true',
-                       help='Skip Git alias creation')
-    parser.add_argument('--reset', action='store_true',
-                       help='Reset configuration to defaults')
-    parser.add_argument('--force', action='store_true',
-                       help='Force overwrite existing configuration')
-    
-    return parser.parse_args()
-
-
-def check_current_setup():
-    """Check current setup status"""
-    print("🔍 Checking current setup status...")
-    
-    # Check configuration file
-    config_file = Path('.git_helper_config.json')
-    if config_file.exists():
-        print("✅ Configuration file exists")
-        try:
-            with open(config_file) as f:
-                config = json.load(f)
-            print(f"   GitHub: {config.get('github', {}).get('owner', 'not set')}/{config.get('github', {}).get('repo', 'not set')}")
-            print(f"   Main branch: {config.get('main_branch', 'not set')}")
-        except Exception as e:
-            print(f"⚠️ Configuration file exists but is invalid: {e}")
-    else:
-        print("❌ Configuration file not found")
-    
-    # Check Git hooks
-    pre_commit_hook = Path('.git/hooks/pre-commit')
-    if pre_commit_hook.exists():
-        print("✅ Pre-commit hook installed")
-    else:
-        print("❌ Pre-commit hook not found")
-    
-    # Check Git alias
+    # Check Git
+    git_ok = False
+    git_version = "Not found"
     try:
-        result = subprocess.run(['git', 'config', 'alias.helper'], 
-                              capture_output=True, text=True, check=True)
-        print("✅ Git alias 'helper' configured")
+        result = subprocess.run(['git', '--version'], capture_output=True, check=True, text=True)
+        git_version = result.stdout.strip()
+        git_ok = True
+        requirements_table.add_row("Git", "Any version", "✓", git_version)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        requirements_table.add_row("Git", "Any version", "✗", "Not found")
+    
+    # Check if in git repository
+    repo_ok = False
+    try:
+        subprocess.run(['git', 'rev-parse', '--git-dir'], capture_output=True, check=True)
+        requirements_table.add_row("Git Repository", "Required", "✓", "Repository found")
+        repo_ok = True
     except subprocess.CalledProcessError:
-        print("❌ Git alias 'helper' not found")
+        requirements_table.add_row("Git Repository", "Required", "✗", "Not in a Git repository")
     
-    # Check symlink
-    local_bin = Path.home() / '.local' / 'bin' / 'git_helper'
-    if local_bin.exists():
-        print("✅ git_helper symlink exists")
+    # Check for required Python packages
+    packages = [
+        ("typer", "≥ 0.9.0"),
+        ("rich", "≥ 13.0.0"),
+    ]
+    
+    package_ok = True
+    for package, version in packages:
+        try:
+            module = __import__(package)
+            ver = getattr(module, "__version__", "unknown")
+            requirements_table.add_row(f"Package: {package}", version, "✓", f"Found {ver}")
+        except ImportError:
+            requirements_table.add_row(f"Package: {package}", version, "✗", "Not installed")
+            package_ok = False
+    
+    console.print(requirements_table)
+    
+    all_ok = python_ok and git_ok and repo_ok and package_ok
+    
+    if all_ok:
+        console.print("\n[green]✓ All requirements met![/green]")
     else:
-        print("❌ git_helper symlink not found")
+        console.print("\n[red]✗ Some requirements are not met.[/red]")
+        
+        # Provide installation help
+        if not package_ok:
+            console.print("\n[yellow]To install missing packages:[/yellow]")
+            console.print("pip install -r requirements.txt")
+    
+    return all_ok
 
 
-def main():
-    """Main setup function"""
-    args = parse_arguments()
-    
-    print_banner()
-    
-    # Check requirements first
-    if not check_requirements():
-        print("\n❌ Setup failed - requirements not met")
-        sys.exit(1)
-    
-    # Handle check mode
-    if args.check:
-        check_current_setup()
-        return
-    
-    # Handle reset mode
-    if args.reset:
-        print("🔄 Resetting configuration...")
-        config_file = Path('.git_helper_config.json')
-        if config_file.exists():
-            config_file.unlink()
-            print("✅ Removed configuration file")
-    
-    # Check if config exists and force flag
-    config_file = Path('.git_helper_config.json')
-    if config_file.exists() and not args.force and not args.reset:
-        print(f"\n⚠️ Configuration file already exists: {config_file}")
-        print("Use --force to overwrite or --check to view current settings")
-        return
-    
-    # Create configuration
-    if args.auto:
-        config_file = create_auto_config()
-    else:
-        config_file = create_config()
-    
-    # Install git helper
-    if not install_git_helper():
-        print("\n⚠️ Git helper installation had issues")
-    
-    # Setup git hooks
-    if not args.no_hooks:
-        setup_git_hooks()
-    else:
-        print("\n⏭️ Skipping Git hooks installation")
-    
-    # Create git alias
-    if not args.no_alias:
-        create_alias()
-    else:
-        print("\n⏭️ Skipping Git alias creation")
-    
-    # Print usage guide
-    print_usage_guide()
-    
-    print("Setup completed successfully! 🚀")
+def get_git_remote_info() -> Tuple[Optional[str], Optional[str]]:
+    """Auto-detect GitHub repository information from remote URL"""
+    try:
+        result = subprocess.run(
+            ['git', 'remote', 'get-url', 'origin'], 
+            capture_output=True, 
+            text=True,
+            check=False
+        )
+        
+        if result.returncode != 0:
+            return None, None
+            
+        remote_url = result.stdout.strip()
+        
+        # Parse GitHub URL format (HTTPS or SSH)
+        github_https_pattern = r'https://github\.com/([^/]+)/([^/.]+)(?:\.git)?'
+        github_ssh_pattern = r'git@github\.com:([^/]+)/([^/.]+)(?:\.git)?'
+        
+        https_match = re.match(github_https_pattern, remote_url)
+        ssh_match = re.match(github_ssh_pattern, remote_url)
+        
+        match = https_match or ssh_match
+        if match:
+            return match.group(1), match.group(2)
+            
+    except Exception:
+        pass
+        
+    return None, None
 
 
-def create_auto_config():
-    """Create configuration automatically with detected values"""
-    print("\n📝 Creating configuration file automatically...")
+def get_git_user_info() -> Tuple[Optional[str], Optional[str]]:
+    """Get Git user name and email"""
+    try:
+        name_result = subprocess.run(
+            ['git', 'config', 'user.name'],
+            capture_output=True,
+            text=True,
+            check=False
+        )
+        
+        email_result = subprocess.run(
+            ['git', 'config', 'user.email'],
+            capture_output=True,
+            text=True,
+            check=False
+        )
+        
+        user_name = name_result.stdout.strip() if name_result.returncode == 0 else None
+        user_email = email_result.stdout.strip() if email_result.returncode == 0 else None
+        
+        return user_name, user_email
+        
+    except Exception:
+        pass
+        
+    return None, None
+
+
+def create_config() -> Dict[str, Any]:
+    """Create configuration file"""
+    console.print("\n[cyan]Creating configuration file...[/cyan]")
     
     # Auto-detect GitHub info
-    auto_owner, auto_repo = get_git_remote_info()
-    git_user, git_email = get_git_user_info()
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task("[cyan]Auto-detecting repository information...[/cyan]")
+        auto_owner, auto_repo = get_git_remote_info()
+        git_user, git_email = get_git_user_info()
+        progress.update(task, completed=True)
     
+    if auto_owner and auto_repo:
+        console.print(f"[green]✓ Detected GitHub repository: {auto_owner}/{auto_repo}[/green]")
+    if git_user:
+        console.print(f"[green]✓ Detected Git user: {git_user} <{git_email}>[/green]")
+    
+    # Create configuration with auto-detected values or prompt for input
     config = {
         "github": {
-            "owner": auto_owner or "",
-            "repo": auto_repo or "",
-            "token": ""
+            "owner": auto_owner or Prompt.ask("[yellow]GitHub repository owner[/yellow]"),
+            "repo": auto_repo or Prompt.ask("[yellow]GitHub repository name[/yellow]"),
+            "token": "YOUR_GITHUB_TOKEN"  # This should be set by the user manually for security
+        },
+        "issue_tracking": {
+            "use_github_issues": True,
+            "issue_prefix": "GH"
         },
         "branch_naming": {
             "feature": "feature/{issue}-{description}",
@@ -518,27 +245,341 @@ def create_auto_config():
             "chore": "chore/{description}",
             "docs": "docs/{description}"
         },
-        "main_branch": "main",
+        "main_branch": Prompt.ask("[yellow]Main branch name[/yellow]", default="main"),
         "protected_branches": ["main", "develop", "release/*"],
-        "user_info": {
-            "name": git_user or "",
-            "email": git_email or ""
-        }
+        "admin_users": [git_user] if git_user else []
     }
     
-    if auto_owner and auto_repo:
-        print(f"✅ Auto-detected GitHub repository: {auto_owner}/{auto_repo}")
-    if git_user:
-        print(f"✅ Auto-detected Git user: {git_user} <{git_email}>")
+    # Show configuration preview
+    config_panel = Panel(
+        Syntax(json.dumps(config, indent=2), "json", theme="monokai"),
+        title="[bold cyan]Configuration Preview[/bold cyan]",
+        border_style="cyan"
+    )
     
-    # Save configuration
-    config_file = Path('.git_helper_config.json')
-    with open(config_file, 'w') as f:
-        json.dump(config, f, indent=2)
+    console.print("\n[yellow]Configuration Preview:[/yellow]")
+    console.print(config_panel)
     
-    print(f"✅ Configuration saved to {config_file}")
-    return config_file
+    # Confirm and save
+    if Confirm.ask("[yellow]Save this configuration?[/yellow]", default=True):
+        try:
+            repo_root = _find_repo_root()
+            config_file = repo_root / '.git_helper_config.json'
+            
+            with open(config_file, 'w') as f:
+                json.dump(config, f, indent=2)
+                
+            console.print(f"[green]✓ Configuration saved to {config_file}[/green]")
+            console.print("[yellow]Note: Update the GitHub token manually for security[/yellow]")
+            
+        except Exception as e:
+            console.print(f"[red]✗ Error saving configuration: {e}[/red]")
+            return None
+    else:
+        console.print("[yellow]Configuration not saved[/yellow]")
+        
+    return config
+
+
+def install_git_hooks(config: Dict[str, Any]) -> bool:
+    """Install Git hooks"""
+    console.print("\n[cyan]Setting up Git hooks...[/cyan]")
+    
+    try:
+        repo_root = _find_repo_root()
+        hooks_dir = repo_root / '.git' / 'hooks'
+        
+        if not hooks_dir.exists():
+            console.print("[yellow]Git hooks directory not found[/yellow]")
+            return False
+        
+        # Pre-push hook to run consistency checks
+        pre_push_hook = hooks_dir / 'pre-push'
+        
+        pre_push_content = f"""#!/bin/sh
+# Git Helper pre-push hook
+# Created: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+#
+# This hook runs consistency checks before pushing to remote
+
+echo "Running consistency checks..."
+python {repo_root}/devops/consistency_checker/checker.py run-all
+
+if [ $? -ne 0 ]; then
+  echo "❌ Consistency checks failed. Please fix issues before pushing."
+  echo "Run 'python {repo_root}/devops/consistency_checker/checker.py run-all --fix' to attempt automatic fixes."
+  exit 1
+fi
+
+echo "✅ Consistency checks passed."
+"""
+        
+        with open(pre_push_hook, 'w') as f:
+            f.write(pre_push_content)
+        
+        # Make hook executable
+        pre_push_hook.chmod(0o755)
+        
+        console.print(f"[green]✓ Installed pre-push hook at {pre_push_hook}[/green]")
+        
+        # Create pre-commit hook
+        pre_commit_hook = hooks_dir / 'pre-commit'
+        
+        pre_commit_content = f"""#!/bin/sh
+# Git Helper pre-commit hook
+# Created: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+#
+# This hook runs checks on the files being committed
+
+echo "Running pre-commit checks..."
+
+# Check for large files
+if git rev-parse --verify HEAD >/dev/null 2>&1; then
+  against=HEAD
+else
+  against=$(git hash-object -t tree /dev/null)
+fi
+
+# Redirect output to stderr
+exec 1>&2
+
+# Check if any large files are being committed
+large_files=$(git diff --cached --name-only --diff-filter=A $against | xargs -I{{}} sh -c 'if [ $(git ls-files --stage {{}} | cut -f2 | xargs -I% git cat-file -s %) -gt 10485760 ]; then echo "{{}}"; fi')
+
+if [ -n "$large_files" ]; then
+  echo "❌ Error: Attempting to commit large files (>10MB):"
+  echo "$large_files"
+  echo "Please remove these files and use Git LFS or alternative storage."
+  exit 1
+fi
+
+echo "✅ Pre-commit checks passed."
+"""
+        
+        with open(pre_commit_hook, 'w') as f:
+            f.write(pre_commit_content)
+        
+        # Make hook executable
+        pre_commit_hook.chmod(0o755)
+        
+        console.print(f"[green]✓ Installed pre-commit hook at {pre_commit_hook}[/green]")
+        
+        return True
+        
+    except Exception as e:
+        console.print(f"[red]✗ Error installing Git hooks: {e}[/red]")
+        return False
+
+
+def create_shell_script() -> bool:
+    """Create shell script to activate the tool"""
+    console.print("\n[cyan]Creating shell script...[/cyan]")
+    
+    try:
+        repo_root = _find_repo_root()
+        bin_dir = repo_root / 'bin'
+        
+        # Create bin directory if it doesn't exist
+        if not bin_dir.exists():
+            bin_dir.mkdir()
+            console.print(f"[green]✓ Created bin directory at {bin_dir}[/green]")
+        
+        # Create git-helper script
+        script_path = bin_dir / 'git-helper'
+        
+        script_content = f"""#!/bin/sh
+# Git Helper wrapper script
+# Created: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+REPO_ROOT="{repo_root}"
+HELPER_SCRIPT="$REPO_ROOT/devops/release_automation/git_helper.py"
+
+# Activate virtual environment if it exists
+if [ -f "$REPO_ROOT/venv/bin/activate" ]; then
+  . "$REPO_ROOT/venv/bin/activate"
+fi
+
+# Run the git helper
+python "$HELPER_SCRIPT" "$@"
+"""
+        
+        with open(script_path, 'w') as f:
+            f.write(script_content)
+        
+        # Make script executable
+        script_path.chmod(0o755)
+        
+        console.print(f"[green]✓ Created git-helper script at {script_path}[/green]")
+        console.print(f"[yellow]Add {bin_dir} to your PATH to use the git-helper command globally[/yellow]")
+        
+        # Show instructions for adding to PATH
+        path_instructions = f"""
+[bold cyan]To add git-helper to your PATH:[/bold cyan]
+
+For bash/zsh users, add to ~/.bashrc or ~/.zshrc:
+[dim]export PATH="{bin_dir}:$PATH"[/dim]
+
+For tcsh users, add to ~/.tcshrc or ~/.cshrc:
+[dim]setenv PATH {bin_dir}:$PATH[/dim]
+
+Then reload your shell configuration or restart your terminal.
+        """
+        
+        console.print(Panel(path_instructions, title="Path Configuration", border_style="blue"))
+        
+        return True
+        
+    except Exception as e:
+        console.print(f"[red]✗ Error creating shell script: {e}[/red]")
+        return False
+
+
+@app.command(name="setup")
+def setup():
+    """Run the complete setup process"""
+    print_banner()
+    
+    steps = [
+        ("Check Requirements", check_requirements),
+        ("Create Configuration", create_config),
+        ("Install Git Hooks", install_git_hooks),
+        ("Create Shell Script", create_shell_script)
+    ]
+    
+    step_results = {}
+    config = None
+    
+    for i, (step_name, step_func) in enumerate(steps, 1):
+        console.print(f"\n[bold cyan]Step {i}/{len(steps)}: {step_name}[/bold cyan]")
+        
+        if step_name == "Install Git Hooks" and config is None:
+            # Skip Git hooks if no config
+            console.print("[yellow]Skipping Git hooks installation (no configuration)[/yellow]")
+            step_results[step_name] = False
+            continue
+            
+        if step_name == "Create Configuration":
+            config = step_func()
+            step_results[step_name] = config is not None
+        else:
+            if step_name == "Install Git Hooks":
+                result = step_func(config)
+            else:
+                result = step_func()
+            step_results[step_name] = result
+        
+        if not step_results[step_name]:
+            if Confirm.ask(f"[yellow]Step '{step_name}' failed. Continue anyway?[/yellow]", default=True):
+                continue
+            else:
+                console.print("[red]Setup aborted[/red]")
+                return
+    
+    # Summary
+    console.print("\n[bold cyan]Setup Summary[/bold cyan]")
+    
+    summary_table = Table(title="Setup Results")
+    summary_table.add_column("Step", style="cyan")
+    summary_table.add_column("Status", style="green")
+    
+    for step_name, result in step_results.items():
+        summary_table.add_row(
+            step_name,
+            "[green]✓ Success[/green]" if result else "[yellow]⚠ Skipped/Failed[/yellow]"
+        )
+    
+    console.print(summary_table)
+    
+    # Final instructions
+    if all(step_results.values()):
+        console.print("\n[green]✓ Setup completed successfully![/green]")
+    else:
+        console.print("\n[yellow]⚠ Setup completed with some steps skipped or failed[/yellow]")
+    
+    console.print("""
+[bold cyan]Next Steps:[/bold cyan]
+
+1. Run [bold]git-helper --help[/bold] to see available commands
+2. Use [bold]git-helper create-branch[/bold] to create your first branch
+3. Review the documentation in the devops/docs directory
+    """)
+
+
+@app.command(name="install-hooks")
+def install_hooks():
+    """Install Git hooks only"""
+    print_banner()
+    
+    if not check_requirements():
+        if not Confirm.ask("[yellow]Some requirements are not met. Continue anyway?[/yellow]", default=False):
+            return
+    
+    try:
+        repo_root = _find_repo_root()
+        config_file = repo_root / '.git_helper_config.json'
+        
+        if config_file.exists():
+            with open(config_file, 'r') as f:
+                config = json.load(f)
+        else:
+            console.print("[yellow]No configuration found. Creating default configuration.[/yellow]")
+            config = create_config()
+            
+            if not config:
+                console.print("[red]Failed to create configuration[/red]")
+                return
+        
+        if install_git_hooks(config):
+            console.print("[green]✓ Git hooks installed successfully[/green]")
+        else:
+            console.print("[red]✗ Failed to install Git hooks[/red]")
+            
+    except Exception as e:
+        console.print(f"[red]✗ Error: {e}[/red]")
+
+
+@app.command(name="update-config")
+def update_config():
+    """Update existing configuration"""
+    print_banner()
+    
+    try:
+        repo_root = _find_repo_root()
+        config_file = repo_root / '.git_helper_config.json'
+        
+        if config_file.exists():
+            with open(config_file, 'r') as f:
+                existing_config = json.load(f)
+                
+            console.print("[green]✓ Found existing configuration[/green]")
+            
+            # Show current config
+            console.print("\n[yellow]Current Configuration:[/yellow]")
+            console.print(Panel(
+                Syntax(json.dumps(existing_config, indent=2), "json", theme="monokai"),
+                title="Current Configuration",
+                border_style="blue"
+            ))
+            
+            if Confirm.ask("[yellow]Update this configuration?[/yellow]", default=True):
+                new_config = create_config()
+                
+                if new_config:
+                    console.print("[green]✓ Configuration updated[/green]")
+            else:
+                console.print("[yellow]Configuration update cancelled[/yellow]")
+        else:
+            console.print("[yellow]No existing configuration found[/yellow]")
+            
+            if Confirm.ask("[yellow]Create new configuration?[/yellow]", default=True):
+                if create_config():
+                    console.print("[green]✓ Configuration created[/green]")
+            else:
+                console.print("[yellow]Configuration creation cancelled[/yellow]")
+                
+    except Exception as e:
+        console.print(f"[red]✗ Error: {e}[/red]")
 
 
 if __name__ == '__main__':
-    main()
+    app()

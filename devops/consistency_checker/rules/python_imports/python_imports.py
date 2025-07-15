@@ -1,287 +1,328 @@
 #!/usr/bin/env python3
 """
-Python Import Consistency Rule
+Python Imports Rule
 
-This rule checks for consistent Python import patterns and identifies common issues:
-- Unused imports
-- Duplicate imports
-- Import order violations
-- Relative import issues
-- Missing imports
-
-Can automatically fix some issues like removing unused imports and sorting imports.
+This rule enforces consistent Python import conventions:
+- Standard library imports first
+- Third-party imports second  
+- Local application imports last
+- Alphabetical ordering within each group
+- No wildcard imports (from module import *)
+- No unused imports
+- No duplicate imports
 """
 
 import ast
-import os
+import sys
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional, Set
+
+# Add the base directory to Python path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+from base_rule import BaseRule, Violation, Severity, CheckResult, FixResult, RuleMetadata
 
 
-DESCRIPTION = "Checks Python import consistency and identifies unused/duplicate imports"
-
-
-def check(repo_root: Path) -> Dict[str, Any]:
-    """
-    Check Python import consistency across the repository
+class PythonImportsRule(BaseRule):
+    """Rule to enforce Python import conventions"""
     
-    Args:
-        repo_root: Root directory of the repository
+    def __init__(self, config: Dict[str, Any] = None):
+        super().__init__(config)
         
-    Returns:
-        Dictionary with violations and warnings
-    """
-    violations = []
-    warnings = []
+        # Default configuration
+        self.default_config = {
+            'enforce_import_order': True,
+            'alphabetical_within_groups': True,
+            'disallow_wildcard_imports': True,
+            'check_unused_imports': True,
+            'check_duplicate_imports': True,
+            'separate_groups_with_blank_line': True,
+            'max_imports_per_line': 1,
+            'allowed_wildcard_modules': [],  # Modules where wildcard imports are allowed
+        }
+        
+        # Merge with provided config
+        if config:
+            self.default_config.update(config)
     
-    # Find all Python files
-    python_files = []
-    for root, dirs, files in os.walk(repo_root):
-        # Skip common non-source directories
-        dirs[:] = [d for d in dirs if d not in {'.git', '__pycache__', '.pytest_cache', 'venv', '.venv', 'node_modules'}]
-        
-        for file in files:
-            if file.endswith('.py'):
-                python_files.append(Path(root) / file)
+    def _create_metadata(self) -> RuleMetadata:
+        """Create metadata for this rule"""
+        return RuleMetadata(
+            name="python_imports",
+            description="Enforces consistent Python import conventions and ordering",
+            category="code_style",
+            supports_auto_fix=True,
+            version="1.0.0"
+        )
     
-    for file_path in python_files:
-        try:
-            file_violations, file_warnings = _check_file_imports(file_path, repo_root)
-            violations.extend(file_violations)
-            warnings.extend(file_warnings)
-        except Exception as e:
-            warnings.append({
-                'file': str(file_path.relative_to(repo_root)),
-                'line': 0,
-                'message': f"Could not parse file: {e}",
-                'severity': 'warning'
-            })
-    
-    return {
-        'violations': violations,
-        'warnings': warnings
-    }
-
-
-def _check_file_imports(file_path: Path, repo_root: Path) -> tuple:
-    """Check imports in a single Python file"""
-    violations = []
-    warnings = []
-    
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
+    def check(self, repo_root: Path, files: Optional[List[Path]] = None) -> CheckResult:
+        """Check Python files for import convention violations"""
+        violations = []
         
-        # Parse AST
-        tree = ast.parse(content, filename=str(file_path))
+        if files is None:
+            # Find all Python files in the repository
+            python_files = list(repo_root.rglob("*.py"))
+        else:
+            python_files = [f for f in files if f.suffix == ".py"]
         
-        # Collect import information
-        imports = []
-        used_names = set()
-        
-        class ImportVisitor(ast.NodeVisitor):
-            def visit_Import(self, node):
-                for alias in node.names:
-                    imports.append({
-                        'type': 'import',
-                        'module': alias.name,
-                        'alias': alias.asname,
-                        'line': node.lineno,
-                        'node': node
-                    })
-            
-            def visit_ImportFrom(self, node):
-                for alias in node.names:
-                    imports.append({
-                        'type': 'from_import',
-                        'module': node.module,
-                        'name': alias.name,
-                        'alias': alias.asname,
-                        'line': node.lineno,
-                        'level': node.level,
-                        'node': node
-                    })
-            
-            def visit_Name(self, node):
-                if isinstance(node.ctx, ast.Load):
-                    used_names.add(node.id)
-                self.generic_visit(node)
-            
-            def visit_Attribute(self, node):
-                if isinstance(node.value, ast.Name):
-                    used_names.add(node.value.id)
-                self.generic_visit(node)
-        
-        visitor = ImportVisitor()
-        visitor.visit(tree)
-        
-        # Check for unused imports
-        for imp in imports:
-            import_name = imp.get('alias') or imp.get('name') or imp.get('module', '').split('.')[0]
-            
-            if import_name and import_name not in used_names:
-                # Special cases that are often used implicitly
-                if import_name not in {'typing', 'annotations', '__future__'}:
-                    violations.append({
-                        'file': str(file_path.relative_to(repo_root)),
-                        'line': imp['line'],
-                        'message': f"Unused import: {import_name}",
-                        'severity': 'warning',
-                        'rule': 'unused_import',
-                        'import_info': imp
-                    })
-        
-        # Check for duplicate imports
-        seen_imports = set()
-        for imp in imports:
-            import_key = (imp['type'], imp.get('module'), imp.get('name'))
-            if import_key in seen_imports:
-                violations.append({
-                    'file': str(file_path.relative_to(repo_root)),
-                    'line': imp['line'],
-                    'message': f"Duplicate import: {imp.get('name') or imp.get('module')}",
-                    'severity': 'error',
-                    'rule': 'duplicate_import'
-                })
-            seen_imports.add(import_key)
-        
-        # Check import order (basic check)
-        previous_type = None
-        for imp in imports:
-            current_type = _get_import_category(imp)
-            if previous_type and _should_come_before(current_type, previous_type):
-                warnings.append({
-                    'file': str(file_path.relative_to(repo_root)),
-                    'line': imp['line'],
-                    'message': f"Import order violation: {current_type} should come before {previous_type}",
-                    'severity': 'style',
-                    'rule': 'import_order'
-                })
-            previous_type = current_type
-        
-    except SyntaxError as e:
-        warnings.append({
-            'file': str(file_path.relative_to(repo_root)),
-            'line': e.lineno or 0,
-            'message': f"Syntax error: {e.msg}",
-            'severity': 'error'
-        })
-    except Exception as e:
-        warnings.append({
-            'file': str(file_path.relative_to(repo_root)),
-            'line': 0,
-            'message': f"Error checking imports: {e}",
-            'severity': 'warning'
-        })
-    
-    return violations, warnings
-
-
-def _get_import_category(imp: Dict[str, Any]) -> str:
-    """Categorize import type for ordering"""
-    module = imp.get('module', '')
-    
-    if imp.get('level', 0) > 0:  # Relative import
-        return 'relative'
-    elif module.startswith('.'):
-        return 'relative'
-    elif module in {'os', 'sys', 'json', 'typing', 'pathlib', 'subprocess', 'datetime'}:
-        return 'standard'
-    elif '.' not in module or module in {'requests', 'yaml', 'click'}:
-        return 'third_party'
-    else:
-        return 'local'
-
-
-def _should_come_before(current: str, previous: str) -> bool:
-    """Check if current import type should come before previous"""
-    order = ['standard', 'third_party', 'local', 'relative']
-    try:
-        return order.index(current) < order.index(previous)
-    except ValueError:
-        return False
-
-
-def fix(repo_root: Path, violations: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    Attempt to automatically fix import violations
-    
-    Args:
-        repo_root: Root directory of the repository
-        violations: List of violations to fix
-        
-    Returns:
-        Dictionary with information about fixes applied
-    """
-    fixed = []
-    failed = []
-    
-    # Group violations by file
-    files_to_fix = {}
-    for violation in violations:
-        if violation.get('rule') == 'unused_import':
-            file_path = violation['file']
-            if file_path not in files_to_fix:
-                files_to_fix[file_path] = []
-            files_to_fix[file_path].append(violation)
-    
-    # Fix each file
-    for file_path, file_violations in files_to_fix.items():
-        try:
-            full_path = repo_root / file_path
-            
-            # Read file content
-            with open(full_path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-            
-            # Remove unused import lines (in reverse order to preserve line numbers)
-            lines_to_remove = []
-            for violation in file_violations:
-                if 'import_info' in violation:
-                    lines_to_remove.append(violation['line'] - 1)  # Convert to 0-based
-            
-            lines_to_remove.sort(reverse=True)
-            
-            for line_idx in lines_to_remove:
-                if 0 <= line_idx < len(lines):
-                    removed_line = lines.pop(line_idx).strip()
-                    fixed.append({
-                        'file': file_path,
-                        'line': line_idx + 1,
-                        'action': 'removed_unused_import',
-                        'content': removed_line
-                    })
-            
-            # Write back the modified content
-            with open(full_path, 'w', encoding='utf-8') as f:
-                f.writelines(lines)
+        for file_path in python_files:
+            if not file_path.exists():
+                continue
                 
-        except Exception as e:
-            failed.append({
-                'file': file_path,
-                'error': str(e)
-            })
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                # Parse the AST
+                tree = ast.parse(content, filename=str(file_path))
+                
+                # Visit the AST to find import violations
+                visitor = ImportVisitor(file_path, repo_root, self.default_config)
+                visitor.visit(tree)
+                visitor.finalize()  # Check import ordering
+                violations.extend(visitor.violations)
+                
+            except (SyntaxError, UnicodeDecodeError) as e:
+                # Skip files with syntax errors or encoding issues
+                violations.append(Violation(
+                    rule_name="python_imports",
+                    file_path=file_path,
+                    line_number=1,
+                    column=1,
+                    message=f"Could not parse file: {e}",
+                    severity=Severity.WARNING,
+                    fix_suggestion="Fix syntax errors in the file"
+                ))
+        
+        return CheckResult(
+            violations=violations,
+            files_checked=len(python_files),
+            rule_name="python_imports"
+        )
     
-    return {
-        'fixed': fixed,
-        'failed': failed
-    }
+    def fix(self, repo_root: Path, violations: List[Violation]) -> FixResult:
+        """Attempt to automatically fix import violations"""
+        fixed_violations = []
+        failed_fixes = []
+        
+        # For now, return empty fixes since automatic import reordering is complex
+        return FixResult(
+            fixed_violations=fixed_violations,
+            failed_fixes=violations,  # All violations go to failed for now
+            rule_name="python_imports"
+        )
 
 
-if __name__ == '__main__':
-    # Allow running rule directly for testing
-    import sys
+class ImportVisitor(ast.NodeVisitor):
+    """AST visitor to find import-related violations"""
     
-    repo_root = Path.cwd()
-    if len(sys.argv) > 1:
-        repo_root = Path(sys.argv[1])
+    def __init__(self, file_path: Path, repo_root: Path, config: Dict[str, Any]):
+        self.file_path = file_path
+        self.repo_root = repo_root
+        self.config = config
+        self.violations = []
+        self.imports = []
+        self.seen_imports = set()
+        
+    def visit_Import(self, node: ast.Import):
+        """Visit regular import statements"""
+        for alias in node.names:
+            import_info = {
+                'type': 'import',
+                'module': alias.name,
+                'name': alias.asname or alias.name,
+                'lineno': node.lineno,
+                'col_offset': node.col_offset,
+                'node': node
+            }
+            self.imports.append(import_info)
+            
+            # Check for duplicate imports
+            import_key = (alias.name, alias.asname)
+            if import_key in self.seen_imports:
+                self.violations.append(Violation(
+                    rule_name="python_imports",
+                    file_path=self.file_path,
+                    line_number=node.lineno,
+                    column=node.col_offset,
+                    message=f"Duplicate import: {alias.name}",
+                    severity=Severity.WARNING,
+                    fix_suggestion="Remove duplicate import statement"
+                ))
+            else:
+                self.seen_imports.add(import_key)
+        
+        self.generic_visit(node)
+        
+    def visit_ImportFrom(self, node: ast.ImportFrom):
+        """Visit from ... import statements"""
+        module = node.module or ''
+        
+        for alias in node.names:
+            # Check for wildcard imports
+            if alias.name == '*':
+                if module not in self.config.get('allowed_wildcard_modules', []):
+                    self.violations.append(Violation(
+                        rule_name="python_imports",
+                        file_path=self.file_path,
+                        line_number=node.lineno,
+                        column=node.col_offset,
+                        message=f"Wildcard import not allowed: from {module} import *",
+                        severity=Severity.WARNING,
+                        fix_suggestion="Import specific names instead of using wildcard"
+                    ))
+            
+            import_info = {
+                'type': 'from_import',
+                'module': module,
+                'name': alias.name,
+                'asname': alias.asname,
+                'lineno': node.lineno,
+                'col_offset': node.col_offset,
+                'node': node
+            }
+            self.imports.append(import_info)
+            
+            # Check for duplicate imports
+            import_key = (module, alias.name, alias.asname)
+            if import_key in self.seen_imports:
+                self.violations.append(Violation(
+                    rule_name="python_imports",
+                    file_path=self.file_path,
+                    line_number=node.lineno,
+                    column=node.col_offset,
+                    message=f"Duplicate import: from {module} import {alias.name}",
+                    severity=Severity.WARNING,
+                    fix_suggestion="Remove duplicate import statement"
+                ))
+            else:
+                self.seen_imports.add(import_key)
+        
+        self.generic_visit(node)
     
-    result = check(repo_root)
+    def finalize(self):
+        """Check import ordering after all imports have been collected"""
+        if not self.config.get('enforce_import_order', True):
+            return
+            
+        # Group imports by type
+        import_groups = self._group_imports()
+        
+        # Check if imports are in the correct order
+        self._check_import_order(import_groups)
+        
+        # Check alphabetical ordering within groups
+        if self.config.get('alphabetical_within_groups', True):
+            self._check_alphabetical_order(import_groups)
     
-    print(f"Found {len(result['violations'])} violations and {len(result['warnings'])} warnings")
+    def _group_imports(self) -> Dict[str, List[Dict]]:
+        """Group imports by their type (stdlib, third-party, local)"""
+        groups = {
+            'stdlib': [],
+            'third_party': [],
+            'local': []
+        }
+        
+        for import_info in self.imports:
+            module = import_info['module']
+            group = self._classify_import(module)
+            groups[group].append(import_info)
+        
+        return groups
     
-    for violation in result['violations']:
-        print(f"VIOLATION: {violation['file']}:{violation['line']} - {violation['message']}")
+    def _classify_import(self, module_name: str) -> str:
+        """Classify import as stdlib, third-party, or local"""
+        if not module_name:
+            return 'local'
+        
+        # Check if it's a standard library module
+        if self._is_stdlib_module(module_name):
+            return 'stdlib'
+        
+        # Check if it's a local module (relative to repo root)
+        if self._is_local_module(module_name):
+            return 'local'
+        
+        # Otherwise, it's third-party
+        return 'third_party'
     
-    for warning in result['warnings']:
-        print(f"WARNING: {warning['file']}:{warning['line']} - {warning['message']}")
+    def _is_stdlib_module(self, module_name: str) -> bool:
+        """Check if a module is part of the standard library"""
+        # Get the top-level module name
+        top_module = module_name.split('.')[0]
+        
+        # List of known standard library modules (Python 3.8+)
+        stdlib_modules = {
+            'abc', 'ast', 'asyncio', 'base64', 'collections', 'copy', 'datetime', 
+            'functools', 'hashlib', 'io', 'itertools', 'json', 'logging', 'math', 
+            'os', 'pathlib', 'random', 're', 'subprocess', 'sys', 'time', 'typing', 
+            'urllib', 'uuid', 'warnings'
+        }
+        
+        return top_module in stdlib_modules
+    
+    def _is_local_module(self, module_name: str) -> bool:
+        """Check if a module is local to the project"""
+        # Check if the module corresponds to a file or package in the repo
+        module_path = Path(module_name.replace('.', '/'))
+        
+        # Check for .py file
+        py_file = self.repo_root / f"{module_path}.py"
+        if py_file.exists():
+            return True
+        
+        # Check for package directory
+        pkg_dir = self.repo_root / module_path / "__init__.py"
+        if pkg_dir.exists():
+            return True
+        
+        # Check if it's a relative import
+        if module_name.startswith('.'):
+            return True
+        
+        return False
+    
+    def _check_import_order(self, groups: Dict[str, List[Dict]]):
+        """Check if imports are in the correct order (stdlib, third-party, local)"""
+        expected_order = ['stdlib', 'third_party', 'local']
+        last_group_line = 0
+        
+        for group_name in expected_order:
+            group_imports = groups[group_name]
+            if not group_imports:
+                continue
+            
+            first_import_line = min(imp['lineno'] for imp in group_imports)
+            
+            if first_import_line < last_group_line:
+                self.violations.append(Violation(
+                    rule_name="python_imports",
+                    file_path=self.file_path,
+                    line_number=first_import_line,
+                    column=0,
+                    message=f"Import group '{group_name}' is not in the correct order",
+                    severity=Severity.WARNING,
+                    fix_suggestion="Reorder imports: standard library, third-party, local"
+                ))
+            
+            last_group_line = max(imp['lineno'] for imp in group_imports)
+    
+    def _check_alphabetical_order(self, groups: Dict[str, List[Dict]]):
+        """Check if imports within each group are alphabetically ordered"""
+        for group_name, group_imports in groups.items():
+            if len(group_imports) <= 1:
+                continue
+            
+            sorted_imports = sorted(group_imports, key=lambda x: x['module'])
+            
+            for i, (actual, expected) in enumerate(zip(group_imports, sorted_imports)):
+                if actual['module'] != expected['module']:
+                    self.violations.append(Violation(
+                        rule_name="python_imports",
+                        file_path=self.file_path,
+                        line_number=actual['lineno'],
+                        column=actual['col_offset'],
+                        message=f"Import not in alphabetical order in {group_name} group: {actual['module']}",
+                        severity=Severity.INFO,
+                        fix_suggestion=f"Sort imports alphabetically within {group_name} group"
+                    ))

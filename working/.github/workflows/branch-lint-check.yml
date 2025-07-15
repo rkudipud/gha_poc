@@ -59,6 +59,7 @@ jobs:
       branch-name: ${{ steps.branch.outputs.name }}                       # (11) Extracted branch name.
       verbose-log: ${{ steps.linting.outputs.log-path }}                  # (12) Path to the verbose lint log.
       stats-log-path: ${{ steps.linting.outputs.stats-log-path }}           # (13) Path to the concise statistics lint log.
+      changed-files: ${{ steps.linting.outputs.changed-files }}             # (14) List of changed files.
     steps:
       # -------------------------------------------------------------------------
       # Step 1: Cache pip dependencies.
@@ -153,6 +154,7 @@ jobs:
       # -------------------------------------------------------------------------
       - name: Upload lint artifacts
         uses: actions/upload-artifact@v4
+        if: steps.changed-files.outputs.python_files_changed == 'true'
         with:
           name: lint-artifacts-${{ github.ref_name }}
           path: |
@@ -233,7 +235,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            //const core = require('@actions/core');
+            const core = require('@actions/core');
             const branchName = "${{ needs.lint.outputs.branch-name }}";
             const issues = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
@@ -262,7 +264,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            //const core = require('@actions/core');
+            const core = require('@actions/core');
             const branchName = "${{ needs.lint.outputs.branch-name }}";
             const changedFiles = `${{ needs.lint.outputs.changed-files }}`;
             const actor = context.actor;
@@ -322,7 +324,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            //const core = require('@actions/core');
+            const core = require('@actions/core');
             const branchName = "${{ needs.lint.outputs.branch-name }}";
             const actor = context.actor;
             const sha = context.sha.substring(0, 7);
@@ -397,7 +399,6 @@ jobs:
                 issue_number: Number(issueNumber),
                 body: `## 🟢 Lint Issues Resolved
 
-                ## Lint Failure
                 ### Changed files:
                 \`\`\`
                 ${changedFiles}

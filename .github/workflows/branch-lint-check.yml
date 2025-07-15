@@ -122,13 +122,13 @@ jobs:
         # [4] Adjusts linting behavior according to the trigger type.
 
       # -------------------------------------------------------------------------
-      # Step 5: Run Python Linting using the enhanced composite action.
-      #         Executes the enhanced linting action with waiver support.
+      # Step 5: Run Python Linting using the composite action.
+      #         Executes the linting action with waiver support.
       # -------------------------------------------------------------------------
-      - name: Run Enhanced Python Linting
+      - name: Run Python Linting
         id: linting
         if: steps.changed-files.outputs.python_files_changed == 'true'
-        uses: ./.github/actions/python-lint-enhanced
+        uses: ./.github/actions/python-lint
         with:
           changed-only: ${{ steps.lint_mode.outputs.changed_only }}
           python-version: '3.11.1'
@@ -136,7 +136,7 @@ jobs:
           linters: 'flake8'
           fail-on-warnings: 'false'
         continue-on-error: true
-        # [5] Invokes the enhanced lint action with waiver support and detailed reporting.
+        # [5] Invokes the lint action with waiver support and detailed reporting.
 
       # -------------------------------------------------------------------------
       # Step 6: Skip Python Linting.

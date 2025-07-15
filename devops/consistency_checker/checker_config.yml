@@ -13,6 +13,17 @@ settings:
   
   # Enable debug mode for troubleshooting
   debug: false
+  
+  # Output format preferences
+  default_output_format: "console"  # console, html, json, csv
+  
+  # Report generation settings
+  generate_html_reports: true
+  html_report_path: "reports/consistency_report.html"
+  
+  # Performance settings
+  enable_caching: true
+  cache_duration_hours: 24
 
 # File patterns to include in checks
 file_patterns:
@@ -31,22 +42,112 @@ exclude_patterns:
   - "**/node_modules/**"
   - "**/*.pyc"
   - "**/*.pyo"
+  - "**/migrations/**"  # Database migrations often auto-generated
+  - "**/third_party/**" # External code
 
 # Rule configuration
 rules:
-  # Enable/disable specific rules
-  enabled_rules: []  # Empty list means all rules are enabled
-  
-  disabled_rules:
-    # Disable naming_conventions rule entirely to avoid snake_case enforcement
+  # Explicitly enabled rules (empty list means all available rules are enabled)
+  enabled_rules: 
+    - "python_imports"
+    - "code_complexity"
     - "naming_conventions"
     
+  # Explicitly disabled rules
+  disabled_rules:
+    - "rule_template"  # This is just a template, not a real rule
+    
   # Rule-specific configuration
-  python_imports:
-    check_unused: true
-    check_order: true
-    check_wildcards: true
-    allow_wildcard_in_init: true
+  rule_config:
+    python_imports:
+      check_unused: true
+      check_order: true
+      check_wildcards: true
+      allow_wildcard_in_init: true
+      ignore_test_imports: true
+      
+    code_complexity:
+      max_cyclomatic_complexity: 10
+      max_nesting_depth: 4
+      max_function_length: 50
+      max_class_methods: 20
+      ignore_test_files: true
+      
+    naming_conventions:
+      variable_style: "snake_case"
+      function_style: "snake_case"
+      class_style: "PascalCase"
+      constant_style: "UPPER_SNAKE_CASE"
+      max_name_length: 50
+      
+    line_length:
+      max_length: 88  # Black formatter standard
+      ignore_comments: true
+      ignore_imports: false
+      ignore_strings: false
+
+# Integration settings
+integration:
+  # Pre-commit hook configuration
+  pre_commit:
+    enabled: true
+    rules: ["python_imports", "code_complexity"]
+    fail_on_error: true
+    
+  # CI/CD pipeline integration
+  ci_cd:
+    enabled: true
+    rules: ["python_imports", "code_complexity"]
+    generate_reports: true
+    fail_on_error: true
+    
+  # IDE integration
+  ide:
+    enabled: true
+    real_time_checking: true
+    rules: ["python_imports"]
+
+# Notification settings
+notifications:
+  # Waiver expiration notifications
+  waiver_expiry:
+    enabled: true
+    warning_days: 14
+    notification_email: "team-lead@company.com"
+    
+  # Rule failure notifications
+  rule_failures:
+    enabled: false
+    critical_only: true
+    notification_email: "dev-team@company.com"
+
+# Reporting configuration
+reporting:
+  # Console output settings
+  console:
+    show_progress: true
+    show_timing: true
+    max_violations_shown: 20
+    color_output: true
+    
+  # HTML report settings
+  html:
+    template: "default"
+    include_source_snippets: true
+    include_fix_suggestions: true
+    interactive_filtering: true
+    
+  # JSON report settings
+  json:
+    pretty_print: true
+    include_metadata: true
+    schema_version: "1.0"
+    
+  # CSV report settings
+  csv:
+    include_headers: true
+    delimiter: ","
+    quote_strings: true
     
   naming_conventions:
     # DISABLED: This entire rule is disabled via disabled_rules above

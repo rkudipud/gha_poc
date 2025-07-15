@@ -95,7 +95,7 @@ flowchart TD
 │   └── pr-validation.yml         # PR validation and scoring
 │
 ├── actions/                      # Reusable action components
-│   ├── python-lint-enhanced/     # Enhanced Python linting
+│   ├── python-lint/              # Python linting
 │   ├── consistency-check/        # Code consistency validation
 │   ├── security-scan/           # Security vulnerability scanning
 │   ├── coverage-check/          # Test coverage analysis
@@ -117,7 +117,7 @@ flowchart TD
 #### **Soft Checks** (Weighted Scoring)
 | Check | Weight | Purpose |
 |-------|--------|---------|
-| Python Lint Enhanced | 25% | Code style, quality, standards |
+| Python Lint | 25% | Code style, quality, standards |
 | Coverage Check | 20% | Test coverage analysis |
 | Performance Test | 15% | Performance regression detection |
 | Integration Tests | 15% | End-to-end functionality |
@@ -181,7 +181,7 @@ test_suite:
     enabled: true
     timeout_minutes: 15
     
-  - id: "python_lint_enhanced" 
+  - id: "python_lint" 
     enforcement: "soft"       # Contributes to score
     weight: 25
     enabled: true

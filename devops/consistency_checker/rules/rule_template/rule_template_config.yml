@@ -1,0 +1,52 @@
+# Rule Template Configuration
+
+# Enable/disable this rule
+enabled: true
+
+# Rule severity level
+severity: "error"  # error, warning, info
+
+# Auto-fix configuration
+auto_fix:
+  enabled: true
+  max_fixes_per_file: 10
+  backup_files: true
+
+# Rule-specific parameters
+parameters:
+  # Maximum threshold for this rule
+  max_threshold: 10
+  
+  # File patterns to ignore
+  ignore_patterns:
+    - "test_*.py"
+    - "*/migrations/*"
+    - "*/vendor/*"
+  
+  # Enable strict checking mode
+  strict_mode: false
+  
+  # Custom configuration options
+  custom_option: "default_value"
+
+# Performance settings
+performance:
+  # Skip files larger than this size (in bytes)
+  max_file_size: 1048576  # 1MB
+  
+  # Enable parallel processing for this rule
+  parallel: true
+  
+  # Cache results for unchanged files
+  cache_results: true
+
+# Integration settings
+integration:
+  # Run this rule in CI/CD
+  ci_enabled: true
+  
+  # Run this rule in pre-commit hooks
+  pre_commit: true
+  
+  # Run this rule in IDE integration
+  ide_enabled: true

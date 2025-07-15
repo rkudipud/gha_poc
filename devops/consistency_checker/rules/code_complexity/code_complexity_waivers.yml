@@ -1,0 +1,32 @@
+# Waivers for code_complexity rule
+
+# Rule-level waivers (apply to entire files/patterns for this rule)
+rule_waivers:
+  - id: "waiver_complex_sample_file"
+    scope: "**/sample_complex_code.py"
+    reason: "This is a sample file designed to demonstrate complexity issues"
+    approved_by: "test_user"
+    created_date: "2025-07-15"
+    expires: "2025-12-31"
+    active: true
+
+# File-level waivers (apply to all violations in matching files)
+file_waivers:
+  - id: "waiver_boolean_complexity"
+    pattern: "**/sample_complex_code.py"
+    reason: "Sample file for testing - intentionally complex"
+    approved_by: "test_user"
+    created_date: "2025-07-15"
+    expires: "2025-12-31"
+    active: true
+
+# Line-specific waivers (apply to specific lines)
+line_waivers:
+  - id: "waiver_specific_function"
+    file: "/nfs/site/disks/ddi_r2g_14/rkudipud/gha_poc/working/sample_complex_code.py"
+    line: 199
+    reason: "Function designed to test boolean complexity detection"
+    approved_by: "test_user"
+    created_date: "2025-07-15"
+    expires: "2025-12-31"
+    active: true

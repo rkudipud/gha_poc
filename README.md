@@ -39,20 +39,32 @@ This repository features a state-of-the-art DevOps automation system with 3 core
 
 ## 🚀 Quick Start
 
-### Setting Up the DevOps System
+### Setting Up the Environment
 
 ```bash
-# 1. Setup environment and configure all components
-python devops/release_automation/setup.py
+# 1. Create the Python virtual environment
+./make_venv.csh
 
-# 2. Run local checks before any Git operations
-python devops/consistency_checker/checker.py
+# 2. Setup the development tools
+python devops/release_automation/setup.py setup
+```
 
-# 3. Create feature branch and make changes
-python devops/release_automation/git_helper.py create-branch --type feature --description "new-feature"
+### Using the CLI Tools
+
+The project includes CLI tools built with Typer and Rich for a beautiful interface:
+
+```bash
+# Setup environment and configure all components
+python devops/release_automation/setup.py setup
+
+# Run local checks before any Git operations
+python devops/consistency_checker/checker.py run-all
+
+# Create feature branch and make changes
+python devops/release_automation/git_helper.py create-branch feature --description "new-feature"
 # ... make your changes ...
 
-# 4. Commit and push (triggers CI/CD automatically)
+# Commit and push (triggers CI/CD automatically)
 python devops/release_automation/git_helper.py commit-push --message "Add feature"
 ```
 
@@ -524,9 +536,3 @@ Run the setup tool to configure all components:
 ```bash
 python devops/release_automation/setup.py
 ```
-
----
-
-**Last Updated**: July 3, 2025  
-**Repository**: Enterprise DevOps with Modular PR Validation  
-**Support**: Use tool `--help` flags or check `devops/docs/` for detailed guides

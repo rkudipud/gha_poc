@@ -21,7 +21,7 @@ When code is pushed to a feature branch, the automated pipeline triggers:
 
 1. **Branch Lint Workflow** (`.github/workflows/branch-lint-check.yml`)
    - **Smart Change Detection**: Identifies modified files
-   - **Python Linting**: Enhanced linting with waiver support
+   - **Python Linting**: Linting with waiver support
    - **Consistency Validation**: Rules-based code consistency
    - **Waiver Processing**: Applies approved exceptions
    - **Issue Management**: Auto-creates/updates GitHub issues
@@ -62,7 +62,7 @@ The main branch is protected through:
 
 ```
 .github/actions/
-├── python-lint-enhanced/     # Enhanced Python linting with waivers
+├── python-lint/              # Python linting with waivers
 ├── consistency-check/        # Code consistency validation
 ├── security-scan/           # Security vulnerability scanning
 ├── coverage-check/          # Test coverage analysis
@@ -128,7 +128,7 @@ sequenceDiagram
     end
     
     par Soft Checks (Scored)
-        P->>S: python-lint-enhanced (25%)
+        P->>S: python-lint (25%)
         P->>S: coverage-check (20%)
         P->>S: consistency-check (15%)
         P->>S: docs-check (10%)
@@ -221,7 +221,7 @@ python devops/release_automation/test_config_manager.py --set-threshold auto_mer
 - **pr-validation.yml**: Comprehensive PR validation and scoring
 
 #### Actions (Reusable Components)
-- **python-lint-enhanced/**: Advanced Python linting with waiver support
+- **python-lint/**: Advanced Python linting with waiver support
 - **consistency-check/**: Code consistency validation
 - **security-scan/**: Security vulnerability and secret detection
 - **coverage-check/**: Test coverage analysis and reporting
@@ -261,10 +261,10 @@ test_suite:
     action_path: ".github/actions/security-scan"
     
   # Soft checks (weighted scoring)
-  - id: "python_lint_enhanced"
+  - id: "python_lint"
     enforcement: "soft"
     weight: 25
-    action_path: ".github/actions/python-lint-enhanced"
+    action_path: ".github/actions/python-lint"
     
   - id: "coverage_check"
     enforcement: "soft"
