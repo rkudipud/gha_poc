@@ -24,6 +24,7 @@ permissions:
   contents: read
   pull-requests: write
   issues: read
+  statuses: write
 
 jobs:
   validate_pr:
@@ -128,10 +129,9 @@ jobs:
             const issuesResult = '${{ steps.check-issues.outcome }}';
             const qualityResult = '${{ job.status }}';
             
-            let status, message, description;
+            let message, description;
             
             if (issuesResult === 'success' && qualityResult === 'success') {
-              status = 'success';
               message = '✅ PR Validation Passed';
               description = 'No open lint issues and quality checks passed';
               
@@ -143,20 +143,9 @@ jobs:
                 body: `✅ **PR Validation Passed**\n\n- ✅ No open lint issues on source branch\n- ✅ Basic quality checks passed\n\nThis PR is ready for review and merge.`
               });
             } else {
-              status = 'failure';
               message = '❌ PR Validation Failed';
               description = 'Open lint issues or quality checks failed';
             }
-            
-            // Update commit status
-            await github.rest.repos.createCommitStatus({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              sha: context.payload.pull_request.head.sha,
-              state: status,
-              context: 'Simple PR Validation',
-              description: description
-            });
             
             console.log(`${message}: ${description}`);
 
