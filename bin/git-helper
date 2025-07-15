@@ -1,0 +1,14 @@
+#!/bin/sh
+# Git Helper wrapper script
+# Created: 2025-07-15 01:25:40
+
+REPO_ROOT="/nfs/site/disks/ddi_r2g_14/rkudipud/gha_poc"
+HELPER_SCRIPT="$REPO_ROOT/devops/release_automation/git_helper.py"
+
+# Activate virtual environment if it exists
+if [ -f "$REPO_ROOT/venv/bin/activate" ]; then
+  . "$REPO_ROOT/venv/bin/activate"
+fi
+
+# Run the git helper
+python "$HELPER_SCRIPT" "$@"
