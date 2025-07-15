@@ -1,51 +1,15 @@
 # ==============================================================================
-# Modular Pull Request Validation Workflow (Default)
+# Simple Pull Request Validation
 # ==============================================================================
 # Description:
-# This workflow uses a modular, configuration-driven approach for PR validation.
-# It supports configurable test suites with weighted scoring and auto-decision making.
+# This workflow validates PRs by ensuring:
+# 1. The source branch has no open lint issues
+# 2. Basic quality checks pass
+# 3. Auto-approves merge if all checks pass
 #
-# Features:
-# - Configuration-driven test execution via pr-test-config.yml
-# - Modular reusable actions for maintainability
-# - Hard checks (must pass) vs Soft checks (weighted scoring)
-# - Auto-merge decision based on configurable thresholds
-# - Parallel execution where possible
-# - Comprehensive reporting and issue creation
-#
-# Scoring Thresholds (configurable in pr-test-config.yml):
-# - Score >= 85% = Auto-merge approved
-# - Score 65-84% = Manual review required  
-# - Score <= 64% = Block merge
-#
-# Architecture:
-# 1. Load configuration and validate test setup
-# 2. Execute hard checks (parallel where possible)
-# 3. Run weighted soft checks for scoring
-# 4. Calculate final score and make auto-decision
-# 5. Update PR status and create detailed reports
-#
-# Customization:
-# - Edit .github/pr-test-config.yml to adjust thresholds and tests
-# - Add new checks by extending the test_suite section
-# - Environment-specific overrides available for hotfix/performance/security
-# - Waiver system available for temporary exceptions
-#
-# Troubleshooting:
-# - Check GitHub Actions logs for detailed error messages
-# - Review PR comments for specific failure details
-# - Validate config: python -c "import yaml; yaml.safe_load(open('.github/pr-test-config.yml'))"
-# - Documentation: devops/docs/pr-validation.md
-#
-# Quick Commands:
-# - Test config locally: python -c "import yaml; print('✅ Valid YAML' if yaml.safe_load(open('.github/pr-test-config.yml')) else '❌ Invalid')"
-# - View current thresholds: grep -E "(auto_merge_threshold|manual_review_threshold)" .github/pr-test-config.yml
-# - Backup before changes: cp .github/pr-test-config.yml .github/pr-test-config.yml.bak
-#
-# Last Updated: July 3, 2025
 # ==============================================================================
 
-name: Modular PR Validation (Default)
+name: Simple PR Validation
 
 on:
   pull_request:
