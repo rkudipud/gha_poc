@@ -58,7 +58,8 @@ jobs:
       lint-result: ${{ steps.check-lint-results.outputs.lint-result }}    # (10) "pass", "fail", or "skipped" from linting.
       branch-name: ${{ steps.branch.outputs.name }}                       # (11) Extracted branch name.
       verbose-log: ${{ steps.linting.outputs.log-path }}                  # (12) Path to the verbose lint log.
-      stats-log-path: ${{ steps.linting.outputs.stats-log-path }}           # (13) Path to the concise statistics lint log.
+      stats-log-path: ${{ steps.linting.outputs.stats-log-path }}         # (13) Path to the concise statistics lint log.
+      changed-files: ${{ steps.changed-files.outputs.changed_files }}      # (14) List of changed files.
     steps:
       # -------------------------------------------------------------------------
       # Step 1: Cache pip dependencies.
@@ -96,13 +97,16 @@ jobs:
           if echo "$CHANGED_FILES" | grep -q "\.py$"; then
             echo "python_files_changed=true"
             echo "python_files_changed=true" >> $GITHUB_OUTPUT
+           echo "changed_files=$CHANGED_FILES" >> $GITHUB_OUTPUT
           else
             if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
                 echo "python_files_changed=true (manual run, assuming all files changed)"
                 echo "python_files_changed=true" >> $GITHUB_OUTPUT
+               echo "changed_files=$CHANGED_FILES" >> $GITHUB_OUTPUT
             else
                 echo "python_files_changed=false (no Python files changed)"
                 echo "python_files_changed=false" >> $GITHUB_OUTPUT
+               echo "changed_files=$CHANGED_FILES" >> $GITHUB_OUTPUT
             fi
           fi
         # [3] Decides whether linting is necessary based on file changes.
@@ -122,6 +126,18 @@ jobs:
         # [4] Adjusts linting behavior according to the trigger type.
 
       # -------------------------------------------------------------------------
+      # Step 6: Skip Python Linting.
+      #         Bypasses the linting steps if no Python files have changed.
+      # -------------------------------------------------------------------------
+      - name: Skip Python Linting
+        id: skip-linting
+        if: steps.changed-files.outputs.python_files_changed == 'false'
+        run: |
+          echo "No Python files changed. Skipping linting."
+          echo "lint-result=skipped" >> $GITHUB_OUTPUT
+        # [6] Marks the lint result as "skipped" when linting is unnecessary.
+
+      # -------------------------------------------------------------------------
       # Step 5: Run Python Linting using the composite action.
       #         Executes the linting action with simple flake8 checking.
       # -------------------------------------------------------------------------
@@ -135,23 +151,13 @@ jobs:
         continue-on-error: true
         # [5] Invokes the lint action with simple flake8 linting.
 
-      # -------------------------------------------------------------------------
-      # Step 6: Skip Python Linting.
-      #         Bypasses the linting steps if no Python files have changed.
-      # -------------------------------------------------------------------------
-      - name: Skip Python Linting
-        id: skip-linting
-        if: steps.changed-files.outputs.python_files_changed == 'false'
-        run: |
-          echo "No Python files changed. Skipping linting."
-          echo "lint-result=skipped" >> $GITHUB_OUTPUT
-        # [6] Marks the lint result as "skipped" when linting is unnecessary.
-
+     
       # -------------------------------------------------------------------------
       # Step 7: Upload lint artifacts.
       #         Uploads lint log files (verbose and stats) as artifacts for later use.
       # -------------------------------------------------------------------------
       - name: Upload lint artifacts
+        if: steps.changed-files.outputs.python_files_changed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: lint-artifacts-${{ github.ref_name }}
@@ -179,7 +185,11 @@ jobs:
       - name: Set lint result
         id: check-lint-results
         run: |
-            echo "lint-result=${{ steps.linting.outputs.lint-result || steps.skip-linting.outputs.lint-result }}" >> $GITHUB_OUTPUT
+          if [ "${{ steps.changed-files.outputs.python_files_changed }}" = "false" ]; then
+            echo "lint-result=skipped" >> $GITHUB_OUTPUT
+          else
+            echo "lint-result=${{ steps.linting.outputs.lint-result }}" >> $GITHUB_OUTPUT
+          fi
         # [9] Consolidates the lint result for downstream processing.
 
       # -------------------------------------------------------------------------
