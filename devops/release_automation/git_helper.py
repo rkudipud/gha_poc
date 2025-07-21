@@ -1,12 +1,23 @@
 #!/usr/bin/env python3
 """
-Git Helper Script for Enterprise CI/CD Workflow
+Git Helper Script for pyCTH CI/CD Workflow
 
 This script provides a simplified interface for developers to work with
-the enterprise CI/CD pipeline without needing deep Git knowledge.
+Git repositories in an pyCTH CI/CD environment. It automates common
+Git operations like branch creation, commits, pulls requests, and cleanup.
 
-Modern CLI built with Typer and Rich for beautiful, cross-platform experience.
+Features:
+- Automated branch naming with issue tracking
+- Safe commit and push operations
+- Pull request creation
+- Branch synchronization with main
+- Cleanup of merged branches
+
+Author: pyCTH Team
+License: Intel Corporation 2025
+Compatible with: GitHub repositories
 """
+
 import subprocess
 import sys
 import json
@@ -15,42 +26,42 @@ import random
 import time
 import webbrowser
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Annotated, Tuple
+from typing import Optional, List, Dict, Any, Annotated
 from enum import Enum
 from datetime import datetime
 
 import typer
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
-from rich.prompt import Confirm, Prompt, IntPrompt
-from rich.text import Text
-from rich.tree import Tree
-from rich.syntax import Syntax
-from rich.style import Style
-from rich.markdown import Markdown
-from rich.layout import Layout
-from rich.columns import Columns
-from rich.box import Box, ROUNDED, HEAVY, SIMPLE
-from rich import print as rprint
+from rich.prompt import Confirm, Prompt
 
 
-# Initialize Rich console
+# Initialize Rich console for consistent output formatting
 console = Console()
 
-# Typer app
+# Configure Typer CLI application
 app = typer.Typer(
     name="git-helper",
-    help="Enterprise CI/CD Git Helper - Streamlined Git workflow for developers",
+    help="pyCTH CI/CD Git Helper - Streamlined Git workflow for developers",
     rich_markup_mode="rich",
-    no_args_is_help=True,
-    add_completion=True,
+    no_args_is_help=False,  # Allow custom callback for no args
+    add_completion=False,   # Disabled for better cross-platform compatibility
 )
 
 
 class BranchType(str, Enum):
-    """Available branch types"""
+    """
+    Available branch types for consistent naming conventions.
+    
+    These types align with common Git workflow patterns:
+    - feature: New functionality development
+    - bugfix: Bug fixes and corrections
+    - hotfix: Critical production fixes
+    - chore: Maintenance tasks, refactoring
+    - docs: Documentation updates
+    """
     feature = "feature"
     bugfix = "bugfix" 
     hotfix = "hotfix"
@@ -58,42 +69,97 @@ class BranchType(str, Enum):
     docs = "docs"
 
 
-class PullRequestStatus(str, Enum):
-    """Pull request status"""
-    open = "open"
-    closed = "closed"
-    merged = "merged"
-    draft = "draft"
-
-
 class GitHelper:
-    """Main class for Git operations and CI/CD workflow management"""
+    """
+    Main class for Git operations and CI/CD workflow management.
+    
+    This class provides a simplified interface for common Git operations
+    in an pyCTH environment, including branch management, commits,
+    and pull request creation.
+    """
     
     def __init__(self):
+        """Initialize GitHelper with repository configuration."""
         self.repo_root = self._find_repo_root()
         self.config = self._load_config()
         self.github_api_base = "https://api.github.com"
         
     def _find_repo_root(self) -> Path:
-        """Find the Git repository root"""
+        """
+        Find the Git repository root directory by traversing up the directory tree.
+        
+        Returns:
+            Path: Absolute path to the Git repository root
+            
+        Raises:
+            typer.Exit: If no Git repository is found in the directory hierarchy
+        """
         current = Path.cwd()
         while current != current.parent:
             if (current / '.git').exists():
                 return current
             current = current.parent
-        console.print("[red]Error: Not in a Git repository[/red]")
+        console.print("[red]✗ Error: Not in a Git repository[/red]")
         raise typer.Exit(1)
     
     def _load_config(self) -> Dict[str, Any]:
-        """Load configuration from .git_helper_config.json"""
+        """
+        Load configuration from .git_helper_config.json file.
+        
+        If no configuration file exists, creates a default one with
+        standard settings for GitHub integration. Handles both old
+        and new configuration formats for compatibility.
+        
+        Returns:
+            Dict[str, Any]: Configuration dictionary
+        """
         config_file = self.repo_root / '.git_helper_config.json'
         if config_file.exists():
             with open(config_file, 'r') as f:
-                return json.load(f)
+                config = json.load(f)
+                
+            # Handle different configuration formats for compatibility
+            if 'main_branch' not in config:
+                # Try to get main branch from workflow.default_branch (setup.py format)
+                if 'workflow' in config and 'default_branch' in config['workflow']:
+                    config['main_branch'] = config['workflow']['default_branch']
+                else:
+                    # Default to 'main' if not specified
+                    config['main_branch'] = 'main'
+            
+            # Ensure protected_branches exists
+            if 'protected_branches' not in config:
+                config['protected_branches'] = [config['main_branch'], 'develop', 'release/*']
+            
+            # Ensure branch_naming exists
+            if 'branch_naming' not in config:
+                if 'workflow' in config and 'branch_naming' in config['workflow']:
+                    config['branch_naming'] = config['workflow']['branch_naming']
+                else:
+                    config['branch_naming'] = {
+                        "feature": "feature/{issue}-{description}",
+                        "bugfix": "bugfix/{issue}-{description}",
+                        "hotfix": "hotfix/{issue}-{description}",
+                        "chore": "chore/{description}",
+                        "docs": "docs/{description}"
+                    }
+            
+            return config
         return self._create_default_config()
     
     def _create_default_config(self) -> Dict[str, Any]:
-        """Create default configuration"""
+        """
+        Create default configuration file with standard GitHub settings.
+        
+        This configuration includes:
+        - GitHub repository settings
+        - Branch naming conventions
+        - Protected branch definitions
+        - Issue tracking preferences
+        
+        Returns:
+            Dict[str, Any]: Default configuration dictionary
+        """
         config = {
             "github": {
                 "owner": "",
@@ -116,20 +182,29 @@ class GitHelper:
             "admin_users": []
         }
         
+        # Save configuration to file
         config_file = self.repo_root / '.git_helper_config.json'
         with open(config_file, 'w') as f:
             json.dump(config, f, indent=2)
         
-        console.print(Panel(
-            f"Created default config at [blue]{config_file}[/blue]\n"
-            "Please update with your GitHub details",
-            title="[bold cyan]Configuration[/bold cyan]",
-            border_style="cyan"
-        ))
+        console.print(f"[yellow]✓ Created default config at {config_file}[/yellow]")
+        console.print("[yellow]Please update with your GitHub repository details[/yellow]")
         return config
     
     def _run_command(self, command: List[str], capture_output=True) -> subprocess.CompletedProcess:
-        """Run shell command with error handling"""
+        """
+        Execute shell command with proper error handling and working directory.
+        
+        Args:
+            command: List of command components (e.g., ['git', 'status'])
+            capture_output: Whether to capture stdout/stderr
+            
+        Returns:
+            subprocess.CompletedProcess: Command execution result
+            
+        Raises:
+            typer.Exit: If command execution fails
+        """
         try:
             result = subprocess.run(
                 command, 
@@ -140,95 +215,80 @@ class GitHelper:
             )
             return result
         except Exception as e:
-            console.print(f"[red]Error running command {' '.join(command)}: {e}[/red]")
+            console.print(f"[red]✗ Error running command {' '.join(command)}: {e}[/red]")
             raise typer.Exit(1)
     
     def _show_success(self, message: str):
-        """Show success message"""
+        """Display success message with consistent formatting."""
         console.print(f"[green]✓ {message}[/green]")
     
     def _show_error(self, message: str):
-        """Show error message"""
+        """Display error message with consistent formatting."""
         console.print(f"[red]✗ {message}[/red]")
     
     def _show_warning(self, message: str):
-        """Show warning message"""
+        """Display warning message with consistent formatting."""
         console.print(f"[yellow]⚠ {message}[/yellow]")
     
     def _show_info(self, message: str):
-        """Show info message"""
+        """Display informational message with consistent formatting."""
         console.print(f"[blue]ℹ {message}[/blue]")
     
     def _show_branch_status(self, branch_name: str):
-        """Show current branch status after creation"""
+        """
+        Display current branch status after creation with simplified output.
+        
+        Args:
+            branch_name: Name of the current branch
+        """
         main_branch = self.config['main_branch']
         
-        # Get recent commits
-        result = self._run_command(['git', 'log', '--oneline', '-3'])
-        recent_commits = ""
+        # Get recent commits (simplified)
+        result = self._run_command(['git', 'log', '--oneline', '-2'])
         if result.returncode == 0 and result.stdout.strip():
-            for line in result.stdout.strip().split('\n')[:3]:
-                recent_commits += f"   {line}\n"
+            recent_commits = result.stdout.strip().split('\n')
+            console.print(f"\n[cyan]Recent commits:[/cyan]")
+            for commit in recent_commits[:2]:
+                console.print(f"  {commit}")
         
-        # Get file status
-        status_result = self._run_command(['git', 'status', '-s'])
-        status_output = status_result.stdout.strip()
-        file_status = "No changes"
-        if status_output:
-            changed_files = len(status_output.split('\n'))
-            file_status = f"{changed_files} changed file(s)"
-        
-        # Format branch info
-        branch_info = Text.from_markup(
-            f"[bold green]Current branch:[/bold green] [bold blue]{branch_name}[/bold blue]\n"
-            f"[bold green]Based on:[/bold green] [blue]{main_branch}[/blue]\n"
-            f"[bold green]Status:[/bold green] [yellow]{file_status}[/yellow]\n\n"
-            f"[bold blue]Recent commits:[/bold blue]\n"
-        )
-        
-        # Recent commits with syntax highlighting
-        git_log = Syntax(recent_commits.strip(), "bash", theme="monokai", word_wrap=True)
-        
-        # Next steps as a list
-        next_steps = Text.from_markup(
-            f"[bold cyan]Next steps:[/bold cyan]\n"
-            f"   1. Make your code changes\n"
-            f"   2. Run: [bold]git-helper commit-push --message 'Your message'[/bold]\n"
-            f"   3. Create PR when ready: [bold]git-helper create-pr[/bold]"
-        )
-        
-        # Layout in columns
-        layout = Layout()
-        layout.split_column(
-            Layout(Panel(branch_info, title="[bold cyan]Branch Information[/bold cyan]", border_style="cyan")),
-            Layout(Panel(git_log, title="[bold cyan]Recent Commits[/bold cyan]", border_style="blue")),
-            Layout(Panel(next_steps, title="[bold cyan]Workflow[/bold cyan]", border_style="green"))
-        )
-        
-        console.print(layout)
+        # Show next steps
+        console.print(f"\n[cyan]Next steps:[/cyan]")
+        console.print(f"  1. Make your code changes")
+        console.print(f"  2. Run: [bold]git_helper commit-push --message 'Your message'[/bold]")
+        console.print(f"  3. Create PR: [bold]git_helper create-pr --title 'Your PR title'[/bold]")
 
     def get_current_branch(self) -> str:
-        """Get current Git branch"""
+        """
+        Get the name of the current Git branch.
+        
+        Returns:
+            str: Current branch name
+        """
         result = self._run_command(['git', 'branch', '--show-current'])
         return result.stdout.strip()
     
     def get_remote_origin(self) -> str:
-        """Get remote origin URL"""
+        """
+        Get the remote origin URL for the repository.
+        
+        Returns:
+            str: Remote origin URL
+        """
         result = self._run_command(['git', 'remote', 'get-url', 'origin'])
         return result.stdout.strip()
     
     def is_clean_working_tree(self) -> bool:
-        """Check if working tree is clean"""
+        """
+        Check if the working tree has no uncommitted changes.
+        
+        Returns:
+            bool: True if working tree is clean, False otherwise
+        """
         result = self._run_command(['git', 'status', '--porcelain'])
         return len(result.stdout.strip()) == 0
-        
-    def format_git_output(self, output: str, title: str = "Git Output") -> Panel:
-        """Format git command output in a nice panel with syntax highlighting"""
-        syntax = Syntax(output.strip(), "bash", theme="monokai", word_wrap=True)
-        return Panel(syntax, title=f"[bold cyan]{title}[/bold cyan]", border_style="blue")
 
 
-# Initialize the helper
+# Initialize the GitHelper instance for use in commands
 git_helper = GitHelper()
 
 
@@ -240,12 +300,27 @@ def create_branch(
     branch_name: Annotated[Optional[str], typer.Option("--branch-name", "-b", help="Custom branch name")] = None,
     from_branch: Annotated[Optional[str], typer.Option("--from", "-f", help="Branch to create from (defaults to main branch)")] = None,
 ):
-    """Create a new feature/bugfix/hotfix branch"""
+    """
+    Create a new feature/bugfix/hotfix branch with automated naming.
+    
+    This command:
+    1. Ensures working tree is clean
+    2. Switches to main branch and pulls latest changes
+    3. Creates new branch with appropriate naming convention
+    4. Pushes branch to remote repository
+    5. Displays next steps for development workflow
+    
+    Examples:
+        git_helper create-branch feature --issue 123 --description "user authentication"
+        git_helper create-branch bugfix --description "fix login issue"
+        git_helper create-branch hotfix --branch-name "critical-security-fix"
+    """
+    # Step 1: Validate working tree state
     if not git_helper.is_clean_working_tree():
         git_helper._show_error("Working tree is not clean. Please commit or stash changes first.")
         raise typer.Exit(1)
     
-    # Switch to main and pull latest
+    # Step 2: Switch to main branch and sync with remote
     main_branch = git_helper.config['main_branch']
     git_helper._show_info(f"Switching to {main_branch} and pulling latest changes...")
     
@@ -256,7 +331,10 @@ def create_branch(
     ) as progress:
         task = progress.add_task("Syncing with main branch...", total=None)
         
+        # Switch to main branch
         git_helper._run_command(['git', 'checkout', main_branch])
+        
+        # Pull latest changes from remote
         result = git_helper._run_command(['git', 'pull', 'origin', main_branch])
         
         progress.update(task, completed=100, description="Sync complete")
@@ -265,8 +343,9 @@ def create_branch(
         git_helper._show_error(f"Failed to pull latest changes from {main_branch}")
         raise typer.Exit(1)
     
-    # Use custom branch name if provided
+    # Step 3: Generate branch name using naming conventions
     if branch_name:
+        # Use custom branch name if provided
         final_branch_name = branch_name
     else:
         # Validate inputs for automatic naming
@@ -274,60 +353,61 @@ def create_branch(
             git_helper._show_error("When not using --branch-name, you must provide either --issue, --description, or both")
             raise typer.Exit(1)
             
-        # Create branch name using default naming scheme
+        # Create branch name using configured naming scheme
         if issue:
-            # Use provided issue number
+            # Format issue number with prefix if needed
             issue_prefix = git_helper.config.get('issue_tracking', {}).get('issue_prefix', 'GH')
             if not issue.startswith(issue_prefix):
                 issue = f"{issue_prefix}-{issue}"
             
+            # Use template from configuration
             branch_template = git_helper.config['branch_naming'].get(branch_type.value, 'feature/{issue}-{description}')
             final_branch_name = branch_template.format(
                 issue=issue.upper(),
                 description=description.lower().replace(' ', '-').replace('_', '-') if description else 'task'
             )
         else:
-            # Generate random branch name without issue number
+            # Generate branch name without issue number
             timestamp = int(time.time() % 10000)
             random_id = random.randint(100, 999)
             
             sanitized_description = description.lower().replace(' ', '-').replace('_', '-')
             final_branch_name = f"{branch_type.value}/{sanitized_description}-{random_id}{timestamp}"
     
-    # Validate branch name
+    # Step 4: Validate branch name format
     if not re.match(r'^[a-zA-Z0-9\-_/]+$', final_branch_name):
-        git_helper._show_error("Invalid characters in branch name")
+        git_helper._show_error("Invalid characters in branch name. Use only letters, numbers, hyphens, and underscores.")
         raise typer.Exit(1)
     
-    # Create and checkout new branch
+    # Step 5: Create and checkout new branch
     git_helper._show_info(f"Creating and switching to branch: {final_branch_name}")
     result = git_helper._run_command(['git', 'checkout', '-b', final_branch_name])
     
-    if result.returncode == 0:
-        current_branch = git_helper.get_current_branch()
-        git_helper._show_success(f"Created and switched to branch: {final_branch_name}")
-        
-        # Push branch to remote
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            task = progress.add_task("Pushing branch to remote...", total=None)
-            push_result = git_helper._run_command(['git', 'push', '-u', 'origin', final_branch_name])
-            progress.update(task, completed=100, description="Push complete")
-        
-        if push_result.returncode == 0:
-            git_helper._show_success("Branch pushed to remote successfully")
-        else:
-            git_helper._show_warning("Branch created locally but failed to push to remote")
-            git_helper._show_info("You can push later with: git push -u origin " + final_branch_name)
-        
-        # Show detailed status
-        git_helper._show_branch_status(current_branch)
-    else:
+    if result.returncode != 0:
         git_helper._show_error(f"Failed to create branch: {final_branch_name}")
         raise typer.Exit(1)
+    
+    git_helper._show_success(f"Created and switched to branch: {final_branch_name}")
+    
+    # Step 6: Push branch to remote repository
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Pushing branch to remote...", total=None)
+        push_result = git_helper._run_command(['git', 'push', '-u', 'origin', final_branch_name])
+        progress.update(task, completed=100, description="Push complete")
+    
+    if push_result.returncode == 0:
+        git_helper._show_success("Branch pushed to remote successfully")
+    else:
+        git_helper._show_warning("Branch created locally but failed to push to remote")
+        git_helper._show_info(f"You can push later with: git push -u origin {final_branch_name}")
+    
+    # Step 7: Display branch status and next steps
+    current_branch = git_helper.get_current_branch()
+    git_helper._show_branch_status(current_branch)
 
 
 @app.command(name="commit-push")
@@ -335,121 +415,148 @@ def commit_push(
     message: Annotated[str, typer.Option("--message", "-m", help="Commit message")],
     files: Annotated[Optional[List[str]], typer.Option("--files", "-f", help="Specific files to commit")] = None,
 ):
-    """Commit changes and push to current branch"""
+    """
+    Commit changes and push to current branch with safety checks.
+    
+    This command:
+    1. Validates that current branch is not protected
+    2. Adds specified files (or all changes if none specified)
+    3. Creates commit with provided message
+    4. Pushes changes to remote repository
+    5. Provides feedback on CI/CD pipeline status
+    
+    Examples:
+        git_helper commit-push --message "Add user authentication feature"
+        git_helper commit-push --message "Fix login bug" --files src/login.py tests/test_login.py
+    """
     current_branch = git_helper.get_current_branch()
     
+    # Step 1: Validate branch protection
     if current_branch in git_helper.config['protected_branches']:
         git_helper._show_error(f"Cannot commit directly to protected branch: {current_branch}")
+        git_helper._show_info("Create a feature branch first using: git_helper create-branch")
         raise typer.Exit(1)
     
-    # Add files
+    # Step 2: Add files to staging area
     if files:
+        # Add specific files
+        git_helper._show_info(f"Adding {len(files)} specified files...")
         for file in files:
-            git_helper._run_command(['git', 'add', file])
+            result = git_helper._run_command(['git', 'add', file])
+            if result.returncode != 0:
+                git_helper._show_error(f"Failed to add file: {file}")
+                raise typer.Exit(1)
     else:
+        # Add all changes
+        git_helper._show_info("Adding all changes...")
         git_helper._run_command(['git', 'add', '.'])
     
-    # Check if there are changes to commit
+    # Step 3: Check if there are changes to commit
     result = git_helper._run_command(['git', 'diff', '--staged', '--name-only'])
     if not result.stdout.strip():
-        git_helper._show_warning("No changes to commit")
+        git_helper._show_warning("No changes staged for commit")
         return
     
-    # Show files to be committed
+    # Step 4: Display files to be committed
     staged_files = result.stdout.strip().split('\n')
-    table = Table(title="Files to be committed")
-    table.add_column("File", style="cyan")
-    table.add_column("Status", style="green")
-    
+    console.print(f"\n[cyan]Files to be committed ({len(staged_files)}):[/cyan]")
     for file in staged_files:
-        table.add_row(file, "Modified")
+        console.print(f"  • {file}")
     
-    console.print(table)
-    
-    # Commit changes
+    # Step 5: Create commit
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         console=console,
     ) as progress:
-        task = progress.add_task("Committing changes...", total=None)
+        task = progress.add_task("Creating commit...", total=None)
         commit_result = git_helper._run_command(['git', 'commit', '-m', message])
         progress.update(task, completed=100, description="Commit complete")
     
-    if commit_result.returncode == 0:
-        git_helper._show_success("Changes committed successfully")
-        
-        # Push changes
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            task = progress.add_task("Pushing to remote...", total=None)
-            push_result = git_helper._run_command(['git', 'push', 'origin', current_branch])
-            progress.update(task, completed=100, description="Push complete")
-        
-        if push_result.returncode == 0:
-            git_helper._show_success("Changes pushed successfully")
-            git_helper._show_info("CI/CD pipeline will start automatically. Use 'check-status' to monitor.")
-        else:
-            git_helper._show_error("Failed to push changes")
+    if commit_result.returncode != 0:
+        git_helper._show_error("Failed to create commit")
+        raise typer.Exit(1)
+    
+    git_helper._show_success("Changes committed successfully")
+    
+    # Step 6: Push changes to remote
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Pushing to remote...", total=None)
+        push_result = git_helper._run_command(['git', 'push', 'origin', current_branch])
+        progress.update(task, completed=100, description="Push complete")
+    
+    if push_result.returncode == 0:
+        git_helper._show_success("Changes pushed successfully")
+        git_helper._show_info("CI/CD pipeline will start automatically")
+        git_helper._show_info("Use 'git_helper check-status' to monitor progress")
     else:
-        git_helper._show_error("Failed to commit changes")
+        git_helper._show_error("Failed to push changes")
+        git_helper._show_info("You can try pushing manually with: git push origin " + current_branch)
 
 
 @app.command(name="check-status")
 def check_status():
-    """Check CI/CD pipeline status for current branch"""
+    """
+    Check CI/CD pipeline status and branch synchronization.
+    
+    This command:
+    1. Displays current branch information
+    2. Shows commit differences with main branch
+    3. Provides synchronization recommendations
+    4. Indicates readiness for pull request creation
+    """
     current_branch = git_helper.get_current_branch()
-    
-    console.print(Panel(
-        f"CI/CD Status for branch: [bold blue]{current_branch}[/bold blue]",
-        title="Pipeline Status",
-        style="blue"
-    ))
-    
-    # Get latest commit
-    result = git_helper._run_command(['git', 'rev-parse', 'HEAD'])
-    commit_sha = result.stdout.strip()
-    
-    git_helper._show_info(f"Latest commit: {commit_sha[:8]}")
-    git_helper._show_info("Branch lint check: Passed")
-    
-    # Check if ready for PR
     main_branch = git_helper.config['main_branch']
     
-    # Check if branch is ahead of main
+    console.print(f"\n[cyan]Branch Status: {current_branch}[/cyan]")
+    
+    # Get latest commit information
+    result = git_helper._run_command(['git', 'rev-parse', 'HEAD'])
+    commit_sha = result.stdout.strip()
+    git_helper._show_info(f"Latest commit: {commit_sha[:8]}")
+    
+    # Check commits ahead and behind main branch
     result = git_helper._run_command(['git', 'rev-list', '--count', f'{main_branch}..HEAD'])
     commits_ahead = int(result.stdout.strip()) if result.stdout.strip() else 0
     
-    # Check if branch is behind main
     result = git_helper._run_command(['git', 'rev-list', '--count', f'HEAD..{main_branch}'])
     commits_behind = int(result.stdout.strip()) if result.stdout.strip() else 0
     
-    status_table = Table(title="Branch Status")
-    status_table.add_column("Metric", style="cyan")
-    status_table.add_column("Value", style="white")
-    status_table.add_column("Status", style="green")
+    # Display branch synchronization status
+    console.print(f"\n[cyan]Synchronization with {main_branch}:[/cyan]")
+    console.print(f"  • Commits ahead: {commits_ahead}")
+    console.print(f"  • Commits behind: {commits_behind}")
     
-    status_table.add_row(f"Commits ahead of {main_branch}", str(commits_ahead), "OK" if commits_ahead > 0 else "None")
-    status_table.add_row(f"Commits behind {main_branch}", str(commits_behind), "WARNING" if commits_behind > 0 else "OK")
-    
-    console.print(status_table)
-    
+    # Provide recommendations
     if commits_behind > 0:
-        git_helper._show_warning(f"Branch is {commits_behind} commits behind {main_branch}. Consider syncing.")
-    
-    if commits_ahead > 0 and commits_behind == 0:
-        git_helper._show_success("Branch is ready for PR creation")
+        git_helper._show_warning(f"Branch is {commits_behind} commits behind {main_branch}")
+        git_helper._show_info("Consider running: git_helper sync-main")
+    elif commits_ahead > 0:
+        git_helper._show_success("Branch is ready for pull request creation")
+        git_helper._show_info("Run: git_helper create-pr --title 'Your PR title'")
+    else:
+        git_helper._show_info("Branch is synchronized with main")
 
 
 @app.command(name="sync-main")
 def sync_main():
-    """Sync current branch with main branch"""
+    """
+    Synchronize current branch with main branch.
+    
+    This command:
+    1. Validates working tree is clean
+    2. Fetches latest changes from remote
+    3. Merges main branch into current branch
+    4. Pushes updated branch to remote
+    """
     current_branch = git_helper.get_current_branch()
     main_branch = git_helper.config['main_branch']
     
+    # Step 1: Validate branch and working tree
     if current_branch == main_branch:
         git_helper._show_error("Already on main branch")
         return
@@ -458,34 +565,57 @@ def sync_main():
         git_helper._show_error("Working tree is not clean. Please commit or stash changes first.")
         return
     
-    git_helper._show_info(f"Syncing {current_branch} with {main_branch}...")
+    git_helper._show_info(f"Synchronizing {current_branch} with {main_branch}...")
     
-    # Fetch latest changes
-    git_helper._run_command(['git', 'fetch', 'origin'])
+    # Step 2: Fetch latest changes from remote
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Fetching latest changes...", total=None)
+        git_helper._run_command(['git', 'fetch', 'origin'])
+        progress.update(task, completed=100, description="Fetch complete")
     
-    # Merge main into current branch
+    # Step 3: Merge main branch into current branch
     merge_result = git_helper._run_command(['git', 'merge', f'origin/{main_branch}'])
     
     if merge_result.returncode == 0:
-        git_helper._show_success(f"Successfully synced with {main_branch}")
+        git_helper._show_success(f"Successfully synchronized with {main_branch}")
         
-        # Push updated branch
+        # Step 4: Push updated branch to remote
         push_result = git_helper._run_command(['git', 'push', 'origin', current_branch])
         if push_result.returncode == 0:
             git_helper._show_success("Updated branch pushed to remote")
         else:
-            git_helper._show_warning("Merge conflicts detected. Use 'resolve-conflicts' command.")
+            git_helper._show_warning("Sync successful but failed to push")
+    else:
+        git_helper._show_error("Merge conflicts detected")
+        git_helper._show_info("Please resolve conflicts manually and commit")
 
 
 @app.command(name="create-pr")
 def create_pr(
-    title: Annotated[str, typer.Option("--title", "-t", help="PR title")],
-    description: Annotated[str, typer.Option("--description", "-d", help="PR description")] = "",
+    title: Annotated[str, typer.Option("--title", "-t", help="Pull request title")],
+    description: Annotated[str, typer.Option("--description", "-d", help="Pull request description")] = "",
 ):
-    """Create a pull request"""
+    """
+    Create a pull request for the current branch.
+    
+    This command:
+    1. Validates current branch is not main
+    2. Ensures branch is pushed to remote
+    3. Constructs GitHub PR creation URL
+    4. Opens browser for PR creation
+    
+    Examples:
+        git_helper create-pr --title "Add user authentication feature"
+        git_helper create-pr --title "Fix login bug" --description "Resolves issue with session timeout"
+    """
     current_branch = git_helper.get_current_branch()
     main_branch = git_helper.config['main_branch']
     
+    # Step 1: Validate branch
     if current_branch == main_branch:
         git_helper._show_error("Cannot create PR from main branch")
         return
@@ -494,41 +624,58 @@ def create_pr(
         git_helper._show_error("Working tree is not clean. Please commit changes first.")
         return
     
-    # Check if branch is pushed to remote
+    # Step 2: Check if branch exists on remote
     result = git_helper._run_command(['git', 'ls-remote', '--heads', 'origin', current_branch])
     if not result.stdout.strip():
-        git_helper._show_error("Branch not found on remote. Please push your changes first.")
+        git_helper._show_error("Branch not found on remote")
+        git_helper._show_info("Push your changes first: git_helper commit-push")
         return
     
-    git_helper._show_info(f"Creating PR: {current_branch} -> {main_branch}")
+    # Step 3: Construct PR creation URL
+    git_helper._show_info(f"Creating PR: {current_branch} → {main_branch}")
     git_helper._show_info(f"Title: {title}")
     
-    # This would integrate with GitHub API to create PR
-    pr_url = f"https://github.com/{git_helper.config['github']['owner']}/{git_helper.config['github']['repo']}/compare/{main_branch}...{current_branch}"
+    # Build GitHub PR URL (works for both GitHub.com and GitHub pyCTH)
+    remote_url = git_helper.get_remote_origin()
+    if 'github.com' in remote_url:
+        # Extract owner and repo from URL
+        import re
+        match = re.search(r'github\.com[:/]([^/]+)/([^/\s]+?)(?:\.git)?/?$', remote_url)
+        if match:
+            owner, repo = match.groups()
+            pr_url = f"https://github.com/{owner}/{repo}/compare/{main_branch}...{current_branch}"
+        else:
+            pr_url = "GitHub URL not detected"
+    else:
+        pr_url = "Non-GitHub repository detected"
     
-    console.print(Panel(
-        f"[green]PR creation URL:[/green]\n"
-        f"   {pr_url}\n\n"
-        f"[blue]Please complete PR creation in your browser[/blue]",
-        title="Pull Request",
-        style="green"
-    ))
+    console.print(f"\n[green]✓ PR Creation URL:[/green]")
+    console.print(f"  {pr_url}")
+    console.print(f"\n[blue]Please complete PR creation in your browser[/blue]")
     
-    # Open browser (optional)
-    if Confirm.ask("Open PR creation page in browser?"):
+    # Step 4: Open browser (optional)
+    if pr_url.startswith('https://') and Confirm.ask("Open PR creation page in browser?"):
         webbrowser.open(pr_url)
 
 
 @app.command(name="cleanup")
 def cleanup():
-    """Clean up merged branches"""
+    """
+    Clean up merged branches from local and remote repositories.
+    
+    This command:
+    1. Switches to main branch
+    2. Identifies branches that have been merged
+    3. Displays list of branches to be deleted
+    4. Removes branches locally and from remote (with confirmation)
+    """
     git_helper._show_info("Cleaning up merged branches...")
     
-    # Switch to main
+    # Step 1: Switch to main branch
     main_branch = git_helper.config['main_branch']
     git_helper._run_command(['git', 'checkout', main_branch])
     
-    # Get merged branches
+    # Step 2: Get list of merged branches
     result = git_helper._run_command(['git', 'branch', '--merged'])
     merged_branches = [
         branch.strip().replace('* ', '') 
@@ -540,25 +687,42 @@ def cleanup():
         git_helper._show_info("No merged branches to clean up")
         return
     
-    # Display branches to delete in a table
-    table = Table(title="Merged branches to delete")
-    table.add_column("Branch", style="yellow")
-    table.add_column("Action", style="red")
-    
+    # Step 3: Display branches to be deleted
+    console.print(f"\n[yellow]Merged branches to delete ({len(merged_branches)}):[/yellow]")
     for branch in merged_branches:
-        table.add_row(branch, "DELETE")
+        console.print(f"  • {branch}")
     
-    console.print(table)
-    
-    if Confirm.ask("Delete these branches?"):
+    # Step 4: Confirm and delete branches
+    if Confirm.ask("\nDelete these branches?"):
+        deleted_count = 0
         for branch in merged_branches:
             # Delete local branch
-            git_helper._run_command(['git', 'branch', '-d', branch])
-            # Delete remote branch
+            local_result = git_helper._run_command(['git', 'branch', '-d', branch])
+            if local_result.returncode == 0:
+                deleted_count += 1
+                
+            # Delete remote branch (ignore errors if branch doesn't exist on remote)
             git_helper._run_command(['git', 'push', 'origin', '--delete', branch])
         
-        git_helper._show_success("Merged branches cleaned up")
+        git_helper._show_success(f"Cleaned up {deleted_count} merged branches")
+    else:
+        git_helper._show_info("Branch cleanup cancelled")
 
 
+# Entry point for script execution
 if __name__ == "__main__":
-    app()
+    # Check if no arguments provided
+    if len(sys.argv) == 1:
+        console.print("[bold blue]Git Helper - pyCTH CI/CD Tool[/bold blue]")
+        console.print("Welcome! This tool streamlines Git workflows for pyCTH development.")
+        console.print("\n[cyan]Available commands:[/cyan]")
+        console.print("  • [bold]create-branch[/bold] - Create feature/bugfix/hotfix branches")
+        console.print("  • [bold]commit-push[/bold] - Commit and push changes safely")
+        console.print("  • [bold]check-status[/bold] - Check CI/CD pipeline status")
+        console.print("  • [bold]sync-main[/bold] - Synchronize with main branch")
+        console.print("  • [bold]create-pr[/bold] - Create pull request")
+        console.print("  • [bold]cleanup[/bold] - Clean up merged branches")
+        console.print("\n[green]Quick start:[/green] git_helper create-branch feature --issue 123 --description 'new feature'")
+        console.print("[blue]For help:[/blue] git_helper --help")
+    else:
+        app()

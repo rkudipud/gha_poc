@@ -43,8 +43,8 @@ app = typer.Typer(
     name="consistency-checker",
     help="Consistency Checker Framework - Comprehensive code quality enforcement",
     rich_markup_mode="rich",
-    no_args_is_help=True,
-    add_completion=True,
+    no_args_is_help=False,  # Allow custom callback for no args
+    add_completion=False,   # Disabled for better cross-platform compatibility
 )
 
 
@@ -896,4 +896,19 @@ def show_stats():
 
 
 if __name__ == '__main__':
-    app()
+    # Check if no arguments provided
+    if len(sys.argv) == 1:
+        console.print("[bold blue]Consistency Checker Framework[/bold blue]")
+        console.print("Welcome! This tool enforces coding standards and quality rules.")
+        console.print("\n[cyan]Available commands:[/cyan]")
+        console.print("  • [bold]run-all[/bold] - Run all enabled consistency rules")
+        console.print("  • [bold]run-rule[/bold] - Run a specific rule by name")
+        console.print("  • [bold]list-rules[/bold] - Show all available rules")
+        console.print("  • [bold]show-waivers[/bold] - Display configured waivers")
+        console.print("  • [bold]validate-waivers[/bold] - Check waiver configuration")
+        console.print("  • [bold]config[/bold] - Show current configuration")
+        console.print("  • [bold]stats[/bold] - Show system statistics")
+        console.print("\n[green]Quick start:[/green] consistency_checker run-all")
+        console.print("[blue]For help:[/blue] consistency_checker --help")
+    else:
+        app()
