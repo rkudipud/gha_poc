@@ -8,6 +8,9 @@ __pycache__/
 
 bin
 
+# Ignore any file named 'consistency*' in the repository root
+consistency*
+
 # Distribution / packaging
 .Python
 build/

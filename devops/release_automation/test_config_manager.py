@@ -11,8 +11,7 @@ Usage:
     python devops/release_automation/test_config_manager.py validate
 """
 
-import json
-import sys
+
 import yaml
 from pathlib import Path
 from typing import Dict, Any, Annotated, Optional, List

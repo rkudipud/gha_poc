@@ -92,21 +92,23 @@ jobs:
         run: |
           # Get the list of files changed between HEAD and HEAD~1.
           CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD)
+          PYTHON_CHANGED_FILES=$(echo "$CHANGED_FILES" | grep '\.py$' || true)
           echo "Changed files: $CHANGED_FILES"
-          # Check if any changed file ends with .py and update output accordingly.
-          if echo "$CHANGED_FILES" | grep -q "\.py$"; then
+          echo "Python files changed: $PYTHON_CHANGED_FILES"
+          if [ -n "$PYTHON_CHANGED_FILES" ]; then
             echo "python_files_changed=true"
             echo "python_files_changed=true" >> $GITHUB_OUTPUT
-           echo "changed_files=$CHANGED_FILES" >> $GITHUB_OUTPUT
+            # Output as a comma-separated list, properly quoted
+            echo "changed_files=$(echo $PYTHON_CHANGED_FILES | paste -sd ',' -)" >> $GITHUB_OUTPUT
           else
             if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
                 echo "python_files_changed=true (manual run, assuming all files changed)"
                 echo "python_files_changed=true" >> $GITHUB_OUTPUT
-               echo "changed_files=$CHANGED_FILES" >> $GITHUB_OUTPUT
+                echo "changed_files=$(echo $CHANGED_FILES | paste -sd ',' -)" >> $GITHUB_OUTPUT
             else
                 echo "python_files_changed=false (no Python files changed)"
                 echo "python_files_changed=false" >> $GITHUB_OUTPUT
-               echo "changed_files=$CHANGED_FILES" >> $GITHUB_OUTPUT
+                echo "changed_files=" >> $GITHUB_OUTPUT
             fi
           fi
         # [3] Decides whether linting is necessary based on file changes.
