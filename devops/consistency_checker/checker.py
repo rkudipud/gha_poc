@@ -31,7 +31,7 @@ from rich.layout import Layout
 from rich import print as rprint
 
 # Import components
-from base_rule import BaseRule, CheckResult, Violation, RuleMetadata, Severity, FixResult
+from base_rule import BaseRule, CheckResult, Violation, RuleMetadata, Severity
 from waiver_manager import WaiverManager
 from report_generator import ReportGenerator
 
@@ -45,7 +45,30 @@ app = typer.Typer(
     rich_markup_mode="rich",
     no_args_is_help=False,  # Allow custom callback for no args
     add_completion=False,   # Disabled for better cross-platform compatibility
+    context_settings={"help_option_names": ["-h", "--help"]},  # Enable -h support
 )
+
+
+@app.callback(invoke_without_command=True)
+def main(
+    ctx: typer.Context,
+):
+    """
+    Consistency Checker Framework - Comprehensive code quality enforcement
+    
+    This tool enforces coding standards and consistency across the codebase.
+    """
+    if ctx.invoked_subcommand is None:
+        console.print("[bold blue]Consistency Checker Framework[/bold blue]")
+        console.print("Comprehensive code quality enforcement tool.")
+        console.print("\n[cyan]Available commands:[/cyan]")
+        console.print("  • [bold]run-all[/bold] - Run all enabled consistency rules")
+        console.print("  • [bold]run-rule[/bold] - Run a specific consistency rule")
+        console.print("  • [bold]list-rules[/bold] - List all available rules")
+        console.print("  • [bold]show-waivers[/bold] - Show configured waivers")
+        console.print("\n[green]Quick start:[/green] checker.py run-all")
+        console.print("[blue]For help:[/blue] checker.py --help")
+        return
 
 
 class ConsistencyChecker:
@@ -268,7 +291,6 @@ class ConsistencyChecker:
         
         if verbose:
             table.add_column("Version", style="dim", no_wrap=True)
-            table.add_column("Auto-fix", justify="center", no_wrap=True)
             table.add_column("Performance", style="dim", no_wrap=True)
         
         for rule_name in sorted(self.available_rules.keys()):
@@ -289,11 +311,10 @@ class ConsistencyChecker:
             
             if verbose and metadata:
                 version = metadata.version
-                auto_fix = "[green]Yes[/green]" if metadata.supports_auto_fix else "[red]No[/red]"
                 performance = f"{metadata.estimated_runtime}/{metadata.memory_usage}"
-                row.extend([version, auto_fix, performance])
+                row.extend([version, performance])
             elif verbose:
-                row.extend(["unknown", "[dim]N/A[/dim]", "[dim]N/A[/dim]"])
+                row.extend(["unknown", "[dim]N/A[/dim]"])
             
             table.add_row(*row)
         
@@ -314,7 +335,6 @@ class ConsistencyChecker:
         self, 
         rule_name: str, 
         files: Optional[List[Path]] = None,
-        fix: bool = False, 
         verbose: bool = False
     ) -> CheckResult:
         """Run a specific consistency rule"""
@@ -353,23 +373,6 @@ class ConsistencyChecker:
                 result.waived_violations = waived_violations
                 result.waiver_count = len(waived_violations)
             
-            # Run auto-fix if requested
-            if fix and result.violations and hasattr(rule, 'fix'):
-                try:
-                    console.print(f"[yellow]Attempting to fix {len(result.violations)} violations...[/yellow]")
-                    fix_result = rule.fix(self.repo_root, result.violations)
-                    result.fix_result = fix_result
-                    
-                    if fix_result.fixed_violations:
-                        console.print(f"[green]Fixed {len(fix_result.fixed_violations)} violations[/green]")
-                        
-                        # Update violation list (remove fixed violations)
-                        fixed_ids = {v.id for v in fix_result.fixed_violations}
-                        result.violations = [v for v in result.violations if v.id not in fixed_ids]
-                    
-                except Exception as e:
-                    console.print(f"[yellow]Warning: Auto-fix failed: {e}[/yellow]")
-            
             # Update execution time
             execution_time = (datetime.now() - start_time).total_seconds()
             result.execution_time = execution_time
@@ -390,7 +393,6 @@ class ConsistencyChecker:
     def run_all_rules(
         self, 
         files: Optional[List[Path]] = None,
-        fix: bool = False, 
         verbose: bool = False
     ) -> List[CheckResult]:
         """Run all enabled consistency rules"""
@@ -407,7 +409,6 @@ class ConsistencyChecker:
             Text.from_markup(
                 f"[bold]Repository:[/bold] {self.repo_root}\n"
                 f"[bold]Enabled Rules:[/bold] {len(self.enabled_rules)}\n"
-                f"[bold]Fix Mode:[/bold] {'Enabled' if fix else 'Disabled'}\n"
                 f"[bold]Target:[/bold] {'Specific files' if files else 'All files'}"
             ),
             title="[bold cyan]Consistency Check Execution[/bold cyan]",
@@ -431,7 +432,7 @@ class ConsistencyChecker:
             for rule_name in sorted(self.enabled_rules):
                 progress.update(task, description=f"[bold cyan]Running:[/bold cyan] [yellow]{rule_name}[/yellow]")
                 
-                result = self.run_rule(rule_name, files, fix, verbose)
+                result = self.run_rule(rule_name, files, verbose)
                 results.append(result)
                 
                 # Update statistics
@@ -450,9 +451,6 @@ class ConsistencyChecker:
                 
                 timing = f"({result.execution_time:.2f}s)"
                 progress.console.print(f"{status_msg} {timing}")
-                
-                if result.fix_result and result.fix_result.fixed_violations:
-                    progress.console.print(f"[blue]  ↻ Fixed {len(result.fix_result.fixed_violations)} issues[/blue]")
                 
                 progress.advance(task)
         
@@ -499,19 +497,17 @@ checker = ConsistencyChecker()
 
 @app.command(name="run-all")
 def run_all(
-    fix: Annotated[bool, typer.Option("--fix", "-f", help="Attempt to automatically fix violations")] = False,
     format_type: Annotated[str, typer.Option("--format", help="Output format: console, html, json, csv")] = "console",
     output_file: Annotated[Optional[str], typer.Option("--output", "-o", help="Output file path")] = None,
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Show detailed information")] = False,
     files: Annotated[Optional[List[str]], typer.Option("--files", help="Specific files to check")] = None,
 ):
     """Run all enabled consistency rules"""
-    
     # Convert file paths if provided
     file_paths = [Path(f) for f in files] if files else None
     
     # Run all rules
-    results = checker.run_all_rules(file_paths, fix=fix, verbose=verbose)
+    results = checker.run_all_rules(file_paths, verbose=verbose)
     
     # Generate report
     output_path = Path(output_file) if output_file else None
@@ -524,19 +520,17 @@ def run_all(
 @app.command(name="run-rule")
 def run_rule(
     rule_name: Annotated[str, typer.Argument(help="Name of the rule to run")],
-    fix: Annotated[bool, typer.Option("--fix", "-f", help="Attempt to automatically fix violations")] = False,
     format_type: Annotated[str, typer.Option("--format", help="Output format: console, html, json, csv")] = "console",
     output_file: Annotated[Optional[str], typer.Option("--output", "-o", help="Output file path")] = None,
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Show detailed information")] = False,
     files: Annotated[Optional[List[str]], typer.Option("--files", help="Specific files to check")] = None,
 ):
     """Run a specific consistency rule"""
-    
     # Convert file paths if provided
     file_paths = [Path(f) for f in files] if files else None
     
     # Run single rule
-    result = checker.run_rule(rule_name, file_paths, fix=fix, verbose=verbose)
+    result = checker.run_rule(rule_name, file_paths, verbose=verbose)
     results = [result]
     
     # Generate report
@@ -565,7 +559,6 @@ def show_waivers(
     all_status: Annotated[bool, typer.Option("--all", help="Show all waivers with status columns")] = False,
 ):
     """Show configured waivers and their status"""
-    
     if not checker.waiver_manager.waivers:
         console.print("[yellow]No waivers configured[/yellow]")
         return
@@ -896,19 +889,4 @@ def show_stats():
 
 
 if __name__ == '__main__':
-    # Check if no arguments provided
-    if len(sys.argv) == 1:
-        console.print("[bold blue]Consistency Checker Framework[/bold blue]")
-        console.print("Welcome! This tool enforces coding standards and quality rules.")
-        console.print("\n[cyan]Available commands:[/cyan]")
-        console.print("  • [bold]run-all[/bold] - Run all enabled consistency rules")
-        console.print("  • [bold]run-rule[/bold] - Run a specific rule by name")
-        console.print("  • [bold]list-rules[/bold] - Show all available rules")
-        console.print("  • [bold]show-waivers[/bold] - Display configured waivers")
-        console.print("  • [bold]validate-waivers[/bold] - Check waiver configuration")
-        console.print("  • [bold]config[/bold] - Show current configuration")
-        console.print("  • [bold]stats[/bold] - Show system statistics")
-        console.print("\n[green]Quick start:[/green] consistency_checker run-all")
-        console.print("[blue]For help:[/blue] consistency_checker --help")
-    else:
-        app()
+    app()

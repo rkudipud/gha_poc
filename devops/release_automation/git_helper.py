@@ -41,14 +41,39 @@ from rich.prompt import Confirm, Prompt
 # Initialize Rich console for consistent output formatting
 console = Console()
 
-# Configure Typer CLI application
+# Configure Typer CLI application with -h support
 app = typer.Typer(
     name="git-helper",
     help="pyCTH CI/CD Git Helper - Streamlined Git workflow for developers",
     rich_markup_mode="rich",
     no_args_is_help=False,  # Allow custom callback for no args
     add_completion=False,   # Disabled for better cross-platform compatibility
+    context_settings={"help_option_names": ["-h", "--help"]},  # Enable -h support
 )
+
+
+@app.callback(invoke_without_command=True)
+def main(
+    ctx: typer.Context,
+):
+    """
+    Git Helper - pyCTH CI/CD Tool
+    
+    This tool streamlines Git workflows for pyCTH development.
+    """
+    if ctx.invoked_subcommand is None:
+        console.print("[bold blue]Git Helper - pyCTH CI/CD Tool[/bold blue]")
+        console.print("Welcome! This tool streamlines Git workflows for pyCTH development.")
+        console.print("\n[cyan]Available commands:[/cyan]")
+        console.print("  • [bold]create-branch[/bold] - Create feature/bugfix/hotfix branches")
+        console.print("  • [bold]commit-push[/bold] - Commit and push changes safely")
+        console.print("  • [bold]check-status[/bold] - Check CI/CD pipeline status")
+        console.print("  • [bold]sync-main[/bold] - Synchronize with main branch")
+        console.print("  • [bold]create-pr[/bold] - Create pull request")
+        console.print("  • [bold]cleanup[/bold] - Clean up merged branches")
+        console.print("\n[green]Quick start:[/green] git_helper create-branch feature --issue 123 --description 'new feature'")
+        console.print("[blue]For help:[/blue] git_helper --help")
+        return
 
 
 class BranchType(str, Enum):
@@ -233,6 +258,37 @@ class GitHelper:
     def _show_info(self, message: str):
         """Display informational message with consistent formatting."""
         console.print(f"[blue]ℹ {message}[/blue]")
+    
+    def _is_protected_branch(self, branch_name: str) -> bool:
+        """
+        Check if a branch is protected and should not be deleted.
+        
+        Args:
+            branch_name: Name of the branch to check
+            
+        Returns:
+            bool: True if the branch is protected, False otherwise
+        """
+        if not branch_name:
+            return True  # Treat empty/None as protected for safety
+            
+        protected_branches = self.config.get('protected_branches', [self.config['main_branch'], 'develop', 'release/*'])
+        
+        for protected in protected_branches:
+            if protected.endswith('*'):
+                # Pattern matching for branches like 'release/*'
+                pattern = protected[:-1]  # Remove the '*'
+                if branch_name.startswith(pattern):
+                    return True
+            elif branch_name == protected:
+                # Exact match
+                return True
+        
+        # Always protect main branch as an additional safety measure
+        if branch_name == self.config['main_branch']:
+            return True
+            
+        return False
     
     def _show_branch_status(self, branch_name: str):
         """
@@ -664,65 +720,110 @@ def cleanup():
     Clean up merged branches from local and remote repositories.
     
     This command:
-    1. Switches to main branch
-    2. Identifies branches that have been merged
-    3. Displays list of branches to be deleted
+    1. Switches to main branch and syncs with remote
+    2. Identifies branches that have been merged (excluding protected branches)
+    3. Displays list of branches to be deleted with safety checks
     4. Removes branches locally and from remote (with confirmation)
+    5. Returns to main branch
     """
     git_helper._show_info("Cleaning up merged branches...")
     
-    # Step 1: Switch to main branch
+    # Step 1: Switch to main branch and sync
     main_branch = git_helper.config['main_branch']
-    git_helper._run_command(['git', 'checkout', main_branch])
+    protected_branches = git_helper.config.get('protected_branches', [main_branch, 'develop', 'release/*'])
     
-    # Step 2: Get list of merged branches
+    # Ensure we're on main branch and sync with remote
+    current_branch_result = git_helper._run_command(['git', 'branch', '--show-current'])
+    current_branch = current_branch_result.stdout.strip() if current_branch_result.returncode == 0 else None
+    
+    git_helper._run_command(['git', 'checkout', main_branch])
+    git_helper._show_info(f"Syncing {main_branch} with remote...")
+    sync_result = git_helper._run_command(['git', 'pull', 'origin', main_branch])
+    if sync_result.returncode != 0:
+        git_helper._show_warning(f"Failed to sync {main_branch} with remote, continuing with local state")
+    
+    # Step 2: Get list of merged branches with enhanced filtering
     result = git_helper._run_command(['git', 'branch', '--merged'])
-    merged_branches = [
-        branch.strip().replace('* ', '') 
+    if result.returncode != 0:
+        git_helper._show_error("Failed to get list of merged branches")
+        return
+    
+    all_branches = [
+        branch.strip().replace('* ', '').replace('  ', '') 
         for branch in result.stdout.split('\n') 
-        if branch.strip() and not branch.strip().startswith('*') and branch.strip() != main_branch
+        if branch.strip()
     ]
+    
+    # Filter out protected branches using helper method
+    merged_branches = []
+    for branch in all_branches:
+        # Skip empty branches and current branch indicator
+        if not branch or branch.startswith('*'):
+            continue
+            
+        # Use helper method to check if branch is protected
+        if not git_helper._is_protected_branch(branch):
+            merged_branches.append(branch)
+    
+    # Additional safety check: never delete current branch
+    if current_branch:
+        merged_branches = [b for b in merged_branches if b != current_branch]
     
     if not merged_branches:
         git_helper._show_info("No merged branches to clean up")
+        # Ensure we're back on main branch
+        git_helper._run_command(['git', 'checkout', main_branch])
         return
     
-    # Step 3: Display branches to be deleted
+    # Step 3: Display branches to be deleted with safety information
     console.print(f"\n[yellow]Merged branches to delete ({len(merged_branches)}):[/yellow]")
     for branch in merged_branches:
         console.print(f"  • {branch}")
     
+    console.print(f"\n[green]Protected branches (will NOT be deleted):[/green]")
+    for protected in protected_branches:
+        console.print(f"  • {protected}")
+    
     # Step 4: Confirm and delete branches
-    if Confirm.ask("\nDelete these branches?"):
+    if Confirm.ask(f"\nDelete {len(merged_branches)} merged branches? (Protected branches will be preserved)"):
         deleted_count = 0
-        for branch in merged_branches:
-            # Delete local branch
-            local_result = git_helper._run_command(['git', 'branch', '-d', branch])
-            if local_result.returncode == 0:
-                deleted_count += 1
-                
-            # Delete remote branch (ignore errors if branch doesn't exist on remote)
-            git_helper._run_command(['git', 'push', 'origin', '--delete', branch])
+        failed_count = 0
         
-        git_helper._show_success(f"Cleaned up {deleted_count} merged branches")
+        for branch in merged_branches:
+            try:
+                # Delete local branch
+                local_result = git_helper._run_command(['git', 'branch', '-d', branch])
+                if local_result.returncode == 0:
+                    deleted_count += 1
+                    console.print(f"[green]✓ Deleted local branch: {branch}[/green]")
+                    
+                    # Delete remote branch (ignore errors if branch doesn't exist on remote)
+                    remote_result = git_helper._run_command(['git', 'push', 'origin', '--delete', branch])
+                    if remote_result.returncode == 0:
+                        console.print(f"[green]✓ Deleted remote branch: {branch}[/green]")
+                    else:
+                        console.print(f"[yellow]⚠ Could not delete remote branch: {branch} (may not exist on remote)[/yellow]")
+                else:
+                    failed_count += 1
+                    console.print(f"[red]✗ Failed to delete local branch: {branch}[/red]")
+                    
+            except Exception as e:
+                failed_count += 1
+                console.print(f"[red]✗ Error deleting branch {branch}: {e}[/red]")
+        
+        # Final sync and checkout to main
+        git_helper._run_command(['git', 'checkout', main_branch])
+        
+        if deleted_count > 0:
+            git_helper._show_success(f"Cleaned up {deleted_count} merged branches")
+        if failed_count > 0:
+            git_helper._show_warning(f"{failed_count} branches could not be deleted")
     else:
         git_helper._show_info("Branch cleanup cancelled")
+        # Ensure we're back on main branch
+        git_helper._run_command(['git', 'checkout', main_branch])
 
 
 # Entry point for script execution
 if __name__ == "__main__":
-    # Check if no arguments provided
-    if len(sys.argv) == 1:
-        console.print("[bold blue]Git Helper - pyCTH CI/CD Tool[/bold blue]")
-        console.print("Welcome! This tool streamlines Git workflows for pyCTH development.")
-        console.print("\n[cyan]Available commands:[/cyan]")
-        console.print("  • [bold]create-branch[/bold] - Create feature/bugfix/hotfix branches")
-        console.print("  • [bold]commit-push[/bold] - Commit and push changes safely")
-        console.print("  • [bold]check-status[/bold] - Check CI/CD pipeline status")
-        console.print("  • [bold]sync-main[/bold] - Synchronize with main branch")
-        console.print("  • [bold]create-pr[/bold] - Create pull request")
-        console.print("  • [bold]cleanup[/bold] - Clean up merged branches")
-        console.print("\n[green]Quick start:[/green] git_helper create-branch feature --issue 123 --description 'new feature'")
-        console.print("[blue]For help:[/blue] git_helper --help")
-    else:
-        app()
+    app()

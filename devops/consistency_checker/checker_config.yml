@@ -201,22 +201,6 @@ output:
   # Verbose output
   verbose: false
 
-# Auto-fix configuration
-auto_fix:
-  # Enable auto-fix by default
-  enabled: false
-  
-  # Backup files before auto-fixing
-  backup_files: true
-  
-  # Maximum number of fixes per file
-  max_fixes_per_file: 10
-  
-  # Rules that are allowed to auto-fix
-  allowed_rules:
-    - "python_imports"
-    # Note: naming_conventions doesn't support auto-fix due to complexity
-
 # Notification settings
 notifications:
   # Notify when waivers are about to expire

@@ -47,6 +47,7 @@ app = typer.Typer(
     rich_markup_mode="rich",
     no_args_is_help=False,  # Disabled to prevent empty error box
     add_completion=False,  # Disabled for better cross-platform compatibility
+    context_settings={"help_option_names": ["-h", "--help"]},  # Enable -h support
 )
 
 
@@ -693,7 +694,6 @@ def create_user_symlinks() -> bool:
         # Define script mappings: (source_script, target_command_name)
         script_mappings = [
             (release_automation_dir / 'git_helper.py', 'git_helper'),
-            (release_automation_dir / 'setup.py', 'git_helper_setup'),
             (consistency_checker_dir / 'checker.py', 'consistency_checker'),
         ]
         
@@ -840,11 +840,10 @@ def setup():
 [green]✓ Git Helper configured for this repository[/green]
 [green]✓ User command symlinks created in ~/.local/bin[/green]
 [green]✓ Git hooks installed (pre-commit, pre-push)[/green]
-[green]✓ Available commands: git_helper, git_helper_setup, consistency_checker[/green]
+[green]✓ Available commands: git_helper, consistency_checker[/green]
 
 [yellow]Quick Start:[/yellow]
 • Run: [bold]git_helper --help[/bold]
-• Setup: [bold]git_helper_setup --help[/bold]
 • Check code: [bold]consistency_checker --help[/bold]
 • Config: [bold].git_helper_config.json[/bold] for settings
 • Note: Commands available from any directory (via ~/.local/bin symlinks)
@@ -953,7 +952,7 @@ def create_symlinks():
     
     This command creates symlinks in ~/.local/bin with underscore naming for easy 
     command access without needing to modify PATH or remember full script paths.
-    Creates: git_helper, git_helper_setup, consistency_checker
+    Creates: git_helper, consistency_checker
     """
     # Skip banner for this simple command
     console.print("[cyan]Git Helper Symlink Creation[/cyan]")

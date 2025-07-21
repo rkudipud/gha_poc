@@ -27,7 +27,7 @@ from rich.syntax import Syntax
 from rich.layout import Layout
 from rich.align import Align
 
-from base_rule import CheckResult, Violation, Severity, FixResult
+from base_rule import CheckResult, Violation, Severity
 from waiver_manager import WaiverManager, WaiverRule
 
 
@@ -82,7 +82,6 @@ class ReportGenerator:
         total_violations = sum(len(r.violations) for r in results)
         total_warnings = sum(len(r.warnings) for r in results)
         total_waived = sum(r.waiver_count for r in results)
-        total_fixed = sum(len(r.fix_result.fixed_violations) if r.fix_result else 0 for r in results)
         
         execution_time = sum(r.execution_time for r in results)
         
@@ -111,7 +110,6 @@ class ReportGenerator:
                 'total_violations': total_violations,
                 'total_warnings': total_warnings,
                 'total_waived': total_waived,
-                'total_fixed': total_fixed,
                 'execution_time': execution_time,
                 'files_checked': files_checked,
                 'lines_checked': lines_checked,
@@ -154,7 +152,6 @@ class ReportGenerator:
         table.add_column("Warnings", justify="right", style="yellow")
         table.add_column("Waived", justify="right", style="blue")
         table.add_column("Unused Waivers", justify="right", style="orange3")
-        table.add_column("Fixed", justify="right", style="green")
         table.add_column("Time", justify="right", style="dim")
         table.add_column("Files", justify="right", style="dim")
         
@@ -180,10 +177,8 @@ class ReportGenerator:
             violations_text = str(len(result.violations))
             if critical_count > 0:
                 violations_text = f"[bold red]{violations_text}[/bold red]"
-            elif error_count > 0:
+            if error_count > 0:
                 violations_text = f"[red]{violations_text}[/red]"
-            
-            fixed_count = len(result.fix_result.fixed_violations) if result.fix_result else 0
             
             # Get unused waivers count for this rule
             unused_count = unused_waivers_by_rule.get(result.rule_name, 0)
@@ -198,7 +193,6 @@ class ReportGenerator:
                 str(len(result.warnings)),
                 str(result.waiver_count),
                 unused_text,
-                str(fixed_count) if fixed_count > 0 else "-",
                 f"{result.execution_time:.2f}s",
                 str(result.files_checked) if result.files_checked > 0 else "-"
             )
@@ -347,7 +341,6 @@ class ReportGenerator:
             f"  • [yellow]Warnings: {summary['violations_by_severity'][Severity.WARNING]}[/yellow]\n"
             f"  • [blue]Info: {summary['violations_by_severity'][Severity.INFO]}[/blue]\n"
             f"[bold]Issues Waived:[/bold] [blue]{summary['total_waived']}[/blue]\n"
-            f"[bold]Issues Fixed:[/bold] [green]{summary['total_fixed']}[/green]\n"
             f"[bold]Execution Time:[/bold] {summary['execution_time']:.2f}s\n"
             f"[bold]Files Checked:[/bold] {summary['files_checked']}\n"
             f"[bold]Status:[/bold] {status}"
@@ -444,10 +437,6 @@ class ReportGenerator:
                 <h3>Issues Waived</h3>
                 <div class="value">{{ report_data.summary.total_waived }}</div>
             </div>
-            <div class="summary-card success">
-                <h3>Issues Fixed</h3>
-                <div class="value">{{ report_data.summary.total_fixed }}</div>
-            </div>
         </div>
         
         <table class="rules-table">
@@ -458,7 +447,6 @@ class ReportGenerator:
                     <th>Violations</th>
                     <th>Warnings</th>
                     <th>Waived</th>
-                    <th>Fixed</th>
                     <th>Time (s)</th>
                     <th>Files</th>
                 </tr>
@@ -479,7 +467,6 @@ class ReportGenerator:
                     <td>{{ result.violations|length }}</td>
                     <td>{{ result.warnings|length }}</td>
                     <td>{{ result.waiver_count }}</td>
-                    <td>{{ result.fix_result.fixed_violations|length if result.fix_result else 0 }}</td>
                     <td>{{ "%.2f"|format(result.execution_time) }}</td>
                     <td>{{ result.files_checked if result.files_checked > 0 else "-" }}</td>
                 </tr>
@@ -589,15 +576,6 @@ class ReportGenerator:
                 'waiver_count': result.waiver_count,
                 'waived_violations': [asdict(v) for v in result.waived_violations]
             }
-            
-            if result.fix_result:
-                json_result['fix_result'] = {
-                    'fixed_violations': [asdict(v) for v in result.fix_result.fixed_violations],
-                    'failed_fixes': [asdict(v) for v in result.fix_result.failed_fixes],
-                    'files_modified': list(result.fix_result.files_modified),
-                    'fix_summary': result.fix_result.fix_summary,
-                    'execution_time': result.fix_result.execution_time
-                }
             
             json_results.append(json_result)
         

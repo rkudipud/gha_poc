@@ -8,10 +8,9 @@ and implement the required methods.
 Rule Development Checklist:
 1. Choose a descriptive rule name (e.g., 'line_length', 'function_complexity')
 2. Define file patterns that your rule should check
-3. Implement the check() method to detect violations
-4. Optionally implement fix() method for auto-fixing
-5. Create comprehensive tests
-6. Add configuration parameters if needed
+3. Implement check() method with your rule logic
+4. Test your rule thoroughly
+5. Add configuration to rule_template_config.yml
 7. Document the rule in _create_metadata()
 """
 
@@ -25,7 +24,7 @@ from dataclasses import dataclass
 # Add the consistency_checker directory to the path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from base_rule import BaseRule, CheckResult, Violation, RuleMetadata, Severity, FixResult
+from base_rule import BaseRule, CheckResult, Violation, RuleMetadata, Severity
 
 
 class RuleTemplate(BaseRule):
@@ -59,49 +58,12 @@ class RuleTemplate(BaseRule):
     def _create_metadata(self) -> RuleMetadata:
         """Create metadata for this rule"""
         return RuleMetadata(
-            name="rule_template",  # Replace with your rule name
+            name="rule_template",
             version="1.0.0",
-            description="Template rule for creating new consistency checks",  # Replace with description
-            category="template",  # Replace with appropriate category
-            tags={"template", "example"},  # Replace with relevant tags
-            
-            # Capabilities
-            supports_auto_fix=True,  # Set to True if you implement fix()
+            description="Template for creating new consistency rules",
+            category="template",
             supports_incremental=True,
-            supports_parallel=True,
-            
-            # Performance characteristics
-            estimated_runtime="fast",  # fast, medium, slow
-            memory_usage="low",  # low, medium, high
-            
-            # Configuration schema
-            configurable_parameters={
-                "max_threshold": {
-                    "type": "integer",
-                    "description": "Maximum allowed threshold",
-                    "default": 10,
-                    "minimum": 1
-                },
-                "ignore_patterns": {
-                    "type": "array",
-                    "description": "File patterns to ignore",
-                    "default": []
-                },
-                "strict_mode": {
-                    "type": "boolean",
-                    "description": "Enable strict checking",
-                    "default": False
-                }
-            },
-            
-            # Documentation
-            author="Your Name",
-            maintainer="your.email@company.com",
-            documentation_url="https://docs.company.com/consistency-rules/rule-template",
-            examples=[
-                "Example of problematic code",
-                "Example of fixed code"
-            ]
+            supports_parallel=True
         )
     
     def get_file_patterns(self) -> List[str]:
@@ -113,24 +75,22 @@ class RuleTemplate(BaseRule):
         ]
     
     def should_check_file(self, file_path: Path, repo_root: Path) -> bool:
-        """Determine if a file should be checked by this rule"""
+        """Determine if a file should be checked by this rule, ignoring venv directory"""
+        if "venv" in file_path.parts:
+            return False
         # Call parent implementation first
         if not super().should_check_file(file_path, repo_root):
             return False
-        
         # Additional file filtering logic
         relative_path = str(file_path.relative_to(repo_root))
-        
         # Skip files matching ignore patterns
         import fnmatch
         for pattern in self.ignore_patterns:
             if fnmatch.fnmatch(relative_path, pattern):
                 return False
-        
         # Skip test files in strict mode (example logic)
         if self.strict_mode and "test" in file_path.name.lower():
             return False
-        
         return True
     
     def check(self, repo_root: Path, files: Optional[List[Path]] = None) -> CheckResult:
@@ -183,22 +143,18 @@ class RuleTemplate(BaseRule):
         )
     
     def _discover_files(self, repo_root: Path) -> List[Path]:
-        """Discover files that match this rule's patterns"""
+        """Discover files that match this rule's patterns, skipping venv directory"""
         files = []
-        
         for pattern in self.get_file_patterns():
             files.extend(repo_root.glob(pattern))
-        
-        # Filter and deduplicate
+        # Filter and deduplicate, skip venv
         unique_files = []
         seen = set()
-        
         for file_path in files:
             if file_path.is_file() and file_path not in seen:
-                if self.should_check_file(file_path, repo_root):
+                if "venv" not in file_path.parts and self.should_check_file(file_path, repo_root):
                     unique_files.append(file_path)
                     seen.add(file_path)
-        
         return sorted(unique_files)
     
     def _check_file(self, file_path: Path, repo_root: Path) -> tuple[List[Violation], List[Violation]]:
@@ -335,118 +291,6 @@ class RuleTemplate(BaseRule):
                 complexity += len(child.values) - 1
         
         return complexity
-    
-    def fix(self, repo_root: Path, violations: List[Violation]) -> FixResult:
-        """
-        Attempt to automatically fix violations
-        
-        This is optional - remove this method if auto-fix is not supported
-        """
-        fixed_violations = []
-        failed_fixes = []
-        files_modified = set()
-        
-        # Group violations by file for efficient processing
-        violations_by_file = {}
-        for violation in violations:
-            file_path = violation.file_path
-            if file_path not in violations_by_file:
-                violations_by_file[file_path] = []
-            violations_by_file[file_path].append(violation)
-        
-        # Process each file
-        for file_path, file_violations in violations_by_file.items():
-            try:
-                fixed, failed = self._fix_file(Path(file_path), file_violations)
-                fixed_violations.extend(fixed)
-                failed_fixes.extend(failed)
-                
-                if fixed:
-                    files_modified.add(file_path)
-                    
-            except Exception as e:
-                # Mark all violations as failed if file processing fails
-                for violation in file_violations:
-                    violation.fix_status = "failed"
-                failed_fixes.extend(file_violations)
-        
-        return FixResult(
-            fixed_violations=fixed_violations,
-            failed_fixes=failed_fixes,
-            files_modified=files_modified,
-            fix_summary=f"Fixed {len(fixed_violations)} out of {len(violations)} violations"
-        )
-    
-    def _fix_file(self, file_path: Path, violations: List[Violation]) -> tuple[List[Violation], List[Violation]]:
-        """
-        Fix violations in a single file
-        
-        Returns:
-            Tuple of (fixed_violations, failed_fixes)
-        """
-        fixed = []
-        failed = []
-        
-        # Read current file content
-        content = self.read_file_safely(file_path)
-        if content is None:
-            return [], violations
-        
-        lines = content.splitlines()
-        modified = False
-        
-        # Sort violations by line number (descending) to avoid line number shifts
-        sorted_violations = sorted(violations, key=lambda v: v.line_number, reverse=True)
-        
-        for violation in sorted_violations:
-            try:
-                # Example: Fix line length by breaking long lines
-                if "Line too long" in violation.message and violation.line_number <= len(lines):
-                    line = lines[violation.line_number - 1]
-                    
-                    # Simple fix: break at last space before threshold
-                    if len(line) > self.max_threshold:
-                        break_point = line.rfind(' ', 0, self.max_threshold)
-                        if break_point > 0:
-                            # Break the line
-                            first_part = line[:break_point]
-                            second_part = line[break_point + 1:]
-                            
-                            # Calculate indentation for continuation
-                            indent = len(line) - len(line.lstrip())
-                            continuation_indent = ' ' * (indent + 4)
-                            
-                            lines[violation.line_number - 1] = first_part
-                            lines.insert(violation.line_number, continuation_indent + second_part)
-                            
-                            violation.fix_status = "success"
-                            fixed.append(violation)
-                            modified = True
-                            continue
-                
-                # If we get here, the fix failed
-                violation.fix_status = "failed"
-                failed.append(violation)
-                
-            except Exception:
-                violation.fix_status = "failed"
-                failed.append(violation)
-        
-        # Write back modified content
-        if modified:
-            try:
-                with open(file_path, 'w') as f:
-                    f.write('\n'.join(lines))
-                    if lines and not content.endswith('\n'):
-                        f.write('\n')
-            except Exception:
-                # If write fails, mark all fixes as failed
-                for violation in fixed:
-                    violation.fix_status = "failed"
-                failed.extend(fixed)
-                fixed = []
-        
-        return fixed, failed
     
     def validate_config(self, config: Dict[str, Any]) -> bool:
         """Validate rule configuration"""

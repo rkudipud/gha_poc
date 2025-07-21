@@ -6,12 +6,6 @@ enabled: true
 # Rule severity level
 severity: "error"  # error, warning, info
 
-# Auto-fix configuration
-auto_fix:
-  enabled: true
-  max_fixes_per_file: 10
-  backup_files: true
-
 # Rule-specific parameters
 parameters:
   # Maximum threshold for this rule

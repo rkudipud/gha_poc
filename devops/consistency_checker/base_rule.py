@@ -23,13 +23,7 @@ class Severity(Enum):
     CRITICAL = "critical"
 
 
-class FixStatus(Enum):
-    """Status of auto-fix attempts"""
-    NOT_ATTEMPTED = "not_attempted"
-    SUCCESS = "success"
-    FAILED = "failed"
-    PARTIAL = "partial"
-    NOT_FIXABLE = "not_fixable"
+
 
 
 @dataclass
@@ -61,8 +55,6 @@ class Violation:
     
     # Suggested fixes
     suggested_fix: Optional[str] = None
-    auto_fixable: bool = False
-    fix_status: FixStatus = FixStatus.NOT_ATTEMPTED
     
     # Additional metadata
     tags: Set[str] = field(default_factory=set)
@@ -78,15 +70,7 @@ class Violation:
         return f"{self.rule_name}:{self.file_path}:{self.line_number}:{self.message[:100]}"
 
 
-@dataclass
-class FixResult:
-    """Result of an auto-fix operation"""
-    fixed_violations: List[Violation] = field(default_factory=list)
-    failed_fixes: List[Violation] = field(default_factory=list)
-    partial_fixes: List[Violation] = field(default_factory=list)
-    files_modified: Set[str] = field(default_factory=set)
-    fix_summary: str = ""
-    execution_time: float = 0.0
+
 
 
 @dataclass
@@ -99,7 +83,6 @@ class RuleMetadata:
     tags: Set[str] = field(default_factory=set)
     
     # Rule capabilities
-    supports_auto_fix: bool = False
     supports_incremental: bool = True
     supports_parallel: bool = True
     
@@ -149,9 +132,6 @@ class CheckResult:
     waived_violations: List[Violation] = field(default_factory=list)
     waiver_count: int = 0
     
-    # Fix information
-    fix_result: Optional[FixResult] = None
-    
     # Performance metrics
     performance_metrics: Dict[str, Any] = field(default_factory=dict)
     
@@ -192,22 +172,6 @@ class BaseRule(abc.ABC):
         """
         pass
     
-    def fix(self, repo_root: Path, violations: List[Violation]) -> FixResult:
-        """
-        Attempt to automatically fix violations
-        
-        Args:
-            repo_root: Root directory of the repository
-            violations: List of violations to fix
-            
-        Returns:
-            FixResult containing fix status and details
-        """
-        return FixResult(
-            failed_fixes=violations,
-            fix_summary="Auto-fix not implemented for this rule"
-        )
-    
     @abc.abstractmethod
     def _create_metadata(self) -> RuleMetadata:
         """Create metadata for this rule"""
@@ -226,16 +190,16 @@ class BaseRule(abc.ABC):
         return ["**/*.py"]  # Default to Python files
     
     def should_check_file(self, file_path: Path, repo_root: Path) -> bool:
-        """Determine if a file should be checked by this rule"""
+        """Determine if a file should be checked by this rule, ignoring venv directory"""
         import fnmatch
-        
         relative_path = str(file_path.relative_to(repo_root))
-        
+        # Ignore any file under venv directory
+        if "venv" in file_path.parts:
+            return False
         # Check against file patterns
         for pattern in self.get_file_patterns():
             if fnmatch.fnmatch(relative_path, pattern):
                 return True
-        
         return False
     
     def create_violation(

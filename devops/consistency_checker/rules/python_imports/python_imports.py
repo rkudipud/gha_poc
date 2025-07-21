@@ -20,7 +20,7 @@ from typing import Dict, List, Any, Optional, Set
 # Add the base directory to Python path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from base_rule import BaseRule, Violation, Severity, CheckResult, FixResult, RuleMetadata
+from base_rule import BaseRule, Violation, Severity, CheckResult, RuleMetadata
 
 
 class PythonImportsRule(BaseRule):
@@ -49,39 +49,34 @@ class PythonImportsRule(BaseRule):
         """Create metadata for this rule"""
         return RuleMetadata(
             name="python_imports",
-            description="Enforces consistent Python import conventions and ordering",
+            version="2.0.0",
+            description="Enforces consistent Python import organization and style",
             category="code_style",
-            supports_auto_fix=True,
-            version="1.0.0"
+            supports_incremental=True,
+            supports_parallel=True
         )
     
     def check(self, repo_root: Path, files: Optional[List[Path]] = None) -> CheckResult:
-        """Check Python files for import convention violations"""
+        """Check Python files for import convention violations, skipping venv directory"""
         violations = []
-        
         if files is None:
-            # Find all Python files in the repository
-            python_files = list(repo_root.rglob("*.py"))
+            # Find all Python files in the repository, skip venv
+            python_files = [f for f in repo_root.rglob("*.py") if "venv" not in f.parts]
         else:
-            python_files = [f for f in files if f.suffix == ".py"]
-        
+            python_files = [f for f in files if f.suffix == ".py" and "venv" not in f.parts]
         for file_path in python_files:
             if not file_path.exists():
                 continue
-                
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     content = f.read()
-                
                 # Parse the AST
                 tree = ast.parse(content, filename=str(file_path))
-                
                 # Visit the AST to find import violations
                 visitor = ImportVisitor(file_path, repo_root, self.default_config)
                 visitor.visit(tree)
                 visitor.finalize()  # Check import ordering
                 violations.extend(visitor.violations)
-                
             except (SyntaxError, UnicodeDecodeError) as e:
                 # Skip files with syntax errors or encoding issues
                 violations.append(Violation(
@@ -91,24 +86,11 @@ class PythonImportsRule(BaseRule):
                     column=1,
                     message=f"Could not parse file: {e}",
                     severity=Severity.WARNING,
-                    fix_suggestion="Fix syntax errors in the file"
+                    suggested_fix="Fix syntax errors in the file"
                 ))
-        
         return CheckResult(
             violations=violations,
             files_checked=len(python_files),
-            rule_name="python_imports"
-        )
-    
-    def fix(self, repo_root: Path, violations: List[Violation]) -> FixResult:
-        """Attempt to automatically fix import violations"""
-        fixed_violations = []
-        failed_fixes = []
-        
-        # For now, return empty fixes since automatic import reordering is complex
-        return FixResult(
-            fixed_violations=fixed_violations,
-            failed_fixes=violations,  # All violations go to failed for now
             rule_name="python_imports"
         )
 
@@ -147,7 +129,7 @@ class ImportVisitor(ast.NodeVisitor):
                     column=node.col_offset,
                     message=f"Duplicate import: {alias.name}",
                     severity=Severity.WARNING,
-                    fix_suggestion="Remove duplicate import statement"
+                    suggested_fix="Remove duplicate import statement"
                 ))
             else:
                 self.seen_imports.add(import_key)
@@ -169,7 +151,7 @@ class ImportVisitor(ast.NodeVisitor):
                         column=node.col_offset,
                         message=f"Wildcard import not allowed: from {module} import *",
                         severity=Severity.WARNING,
-                        fix_suggestion="Import specific names instead of using wildcard"
+                        suggested_fix="Import specific names instead of using wildcard"
                     ))
             
             import_info = {
@@ -193,7 +175,7 @@ class ImportVisitor(ast.NodeVisitor):
                     column=node.col_offset,
                     message=f"Duplicate import: from {module} import {alias.name}",
                     severity=Severity.WARNING,
-                    fix_suggestion="Remove duplicate import statement"
+                    suggested_fix="Remove duplicate import statement"
                 ))
             else:
                 self.seen_imports.add(import_key)
@@ -302,7 +284,7 @@ class ImportVisitor(ast.NodeVisitor):
                     column=0,
                     message=f"Import group '{group_name}' is not in the correct order",
                     severity=Severity.WARNING,
-                    fix_suggestion="Reorder imports: standard library, third-party, local"
+                    suggested_fix="Reorder imports: standard library, third-party, local"
                 ))
             
             last_group_line = max(imp['lineno'] for imp in group_imports)
@@ -324,5 +306,5 @@ class ImportVisitor(ast.NodeVisitor):
                         column=actual['col_offset'],
                         message=f"Import not in alphabetical order in {group_name} group: {actual['module']}",
                         severity=Severity.INFO,
-                        fix_suggestion=f"Sort imports alphabetically within {group_name} group"
+                        suggested_fix=f"Sort imports alphabetically within {group_name} group"
                     ))

@@ -20,7 +20,7 @@ from typing import Dict, List, Any, Optional
 # Add the base directory to Python path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from base_rule import BaseRule, Violation, Severity, CheckResult, FixResult, RuleMetadata
+from base_rule import BaseRule, Violation, Severity, CheckResult, RuleMetadata
 
 
 class NamingConventionsRule(BaseRule):
@@ -54,7 +54,6 @@ class NamingConventionsRule(BaseRule):
             version="2.0.0",
             description="Enforces consistent Python naming conventions for functions, classes, variables, and files",
             category="code_style",
-            supports_auto_fix=True,
             supports_incremental=True,
             supports_parallel=True
         )
@@ -107,34 +106,32 @@ class NamingConventionsRule(BaseRule):
             )
     
     def _discover_files(self, repo_root: Path, files: Optional[List[Path]] = None) -> List[Path]:
-        """Discover Python files to check"""
+        """Discover Python files to check, skipping venv directory"""
         if files:
-            # Filter to only Python files
-            return [f for f in files if f.suffix == '.py' and self._should_check_file(f)]
-        
-        # Discover all Python files in the repository
+            # Filter to only Python files, skip venv
+            return [f for f in files if f.suffix == '.py' and "venv" not in f.parts and self._should_check_file(f)]
+        # Discover all Python files in the repository, skip venv
         python_files = []
         for py_file in repo_root.rglob("*.py"):
-            if self._should_check_file(py_file):
+            if "venv" not in py_file.parts and self._should_check_file(py_file):
                 python_files.append(py_file)
-        
         return python_files
     
     def _should_check_file(self, file_path: Path) -> bool:
-        """Check if a file should be analyzed"""
+        """Check if a file should be analyzed, ignoring venv directory"""
+        # Ignore any file under venv directory
+        if "venv" in file_path.parts:
+            return False
         # Skip excluded files
         if file_path.name in self.rule_config['exclude_files']:
             return False
-        
         # Skip excluded patterns
         for pattern in self.rule_config['exclude_patterns']:
             if file_path.match(pattern):
                 return False
-        
         # Skip hidden files and directories
         if any(part.startswith('.') for part in file_path.parts):
             return False
-        
         # Skip __pycache__ directories
         if '__pycache__' in file_path.parts:
             return False
@@ -209,108 +206,6 @@ class NamingConventionsRule(BaseRule):
                 ))
         
         return violations
-    
-    def fix(self, repo_root: Path, violations: List[Violation]) -> FixResult:
-        """Auto-fix naming convention violations where possible"""
-        fixed_violations = []
-        failed_fixes = []
-        
-        # Group violations by file for efficient processing
-        violations_by_file = {}
-        for violation in violations:
-            file_path = violation.file_path
-            if file_path not in violations_by_file:
-                violations_by_file[file_path] = []
-            violations_by_file[file_path].append(violation)
-        
-        for file_path, file_violations in violations_by_file.items():
-            try:
-                if self._fix_file(Path(file_path), file_violations):
-                    fixed_violations.extend(file_violations)
-                else:
-                    failed_fixes.extend(file_violations)
-            except Exception as e:
-                # Mark all violations in this file as failed
-                for violation in file_violations:
-                    violation.fix_status = f"failed: {e}"
-                failed_fixes.extend(file_violations)
-        
-        return FixResult(
-            fixed_violations=fixed_violations,
-            failed_fixes=failed_fixes,
-            fix_summary=f"Fixed {len(fixed_violations)} naming violations"
-        )
-    
-    def _fix_file(self, file_path: Path, violations: List[Violation]) -> bool:
-        """Attempt to fix naming violations in a file"""
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            lines = content.splitlines()
-            modified = False
-            
-            # Sort violations by line number (descending) to avoid offset issues
-            violations.sort(key=lambda v: v.line_number, reverse=True)
-            
-            for violation in violations:
-                if violation.suggested_fix and violation.line_number > 0:
-                    line_idx = violation.line_number - 1
-                    if 0 <= line_idx < len(lines):
-                        # Simple name replacement (this is basic - could be more sophisticated)
-                        old_line = lines[line_idx]
-                        # This is a simplified fix - in practice, you'd want more sophisticated AST-based fixing
-                        lines[line_idx] = old_line  # For now, don't actually modify
-                        modified = True
-                        violation.fix_status = "success"
-            
-            if modified:
-                # Write back the modified content
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write('\n'.join(lines))
-                return True
-            
-            return False
-            
-        except Exception as e:
-            return False
-    
-    def _is_snake_case(self, name: str) -> bool:
-        """Check if name follows snake_case convention"""
-        if not name:
-            return False
-        return re.match(r'^[a-z_][a-z0-9_]*$', name) is not None
-    
-    def _is_pascal_case(self, name: str) -> bool:
-        """Check if name follows PascalCase convention"""
-        if not name:
-            return False
-        return re.match(r'^[A-Z][a-zA-Z0-9]*$', name) is not None
-    
-    def _is_upper_snake_case(self, name: str) -> bool:
-        """Check if name follows UPPER_SNAKE_CASE convention"""
-        if not name:
-            return False
-        return re.match(r'^[A-Z_][A-Z0-9_]*$', name) is not None
-    
-    def _is_constant(self, name: str) -> bool:
-        """Check if name appears to be a constant"""
-        return name.isupper() and '_' in name
-    
-    def _to_snake_case(self, name: str) -> str:
-        """Convert name to snake_case"""
-        # Handle PascalCase/camelCase
-        s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
-        return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
-    
-    def _to_pascal_case(self, name: str) -> str:
-        """Convert name to PascalCase"""
-        components = name.split('_')
-        return ''.join(word.capitalize() for word in components)
-    
-    def _to_upper_snake_case(self, name: str) -> str:
-        """Convert name to UPPER_SNAKE_CASE"""
-        return self._to_snake_case(name).upper()
 
 
 class NamingVisitor(ast.NodeVisitor):

@@ -56,7 +56,6 @@ class CodeComplexity(BaseRule):
             category="code_quality",
             tags={"complexity", "maintainability", "quality"},
             
-            supports_auto_fix=False,  # Complexity fixes require human intervention
             supports_incremental=True,
             supports_parallel=True,
             
@@ -90,8 +89,8 @@ class CodeComplexity(BaseRule):
                 }
             },
             
-            author="Consistency Team",
-            maintainer="consistency@company.com",
+            author="Kudipudi, Rajesh",
+            maintainer="rajesh.kudipudi@intel.com",
             examples=[
                 "# High complexity function (bad)",
                 "def complex_function(x):",
@@ -113,10 +112,11 @@ class CodeComplexity(BaseRule):
         return ["**/*.py"]
     
     def should_check_file(self, file_path: Path, repo_root: Path) -> bool:
-        """Determine if a file should be checked"""
+        """Determine if a file should be checked, ignoring venv directory"""
+        if "venv" in file_path.parts:
+            return False
         if not super().should_check_file(file_path, repo_root):
             return False
-        
         # Skip test files if configured
         if self.ignore_test_files:
             file_name = file_path.name.lower()
@@ -124,7 +124,6 @@ class CodeComplexity(BaseRule):
                 file_name.endswith('_test.py') or
                 'test' in file_path.parts):
                 return False
-        
         return True
     
     def check(self, repo_root: Path, files: Optional[List[Path]] = None) -> CheckResult:
@@ -169,12 +168,12 @@ class CodeComplexity(BaseRule):
         )
     
     def _discover_files(self, repo_root: Path) -> List[Path]:
-        """Discover Python files to check"""
+        """Discover Python files to check, skipping venv directory"""
         files = []
         for pattern in self.get_file_patterns():
             files.extend(repo_root.glob(pattern))
-        
-        return [f for f in files if f.is_file() and self.should_check_file(f, repo_root)]
+        # Explicitly skip any file under venv
+        return [f for f in files if f.is_file() and "venv" not in f.parts and self.should_check_file(f, repo_root)]
     
     def _check_file(self, file_path: Path, repo_root: Path) -> tuple[List[Violation], List[Violation], int]:
         """Check complexity in a single file"""

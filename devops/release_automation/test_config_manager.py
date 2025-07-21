@@ -40,9 +40,36 @@ app = typer.Typer(
     name="test-config-manager",
     help="Modular Test Configuration Manager - Manage test framework configuration",
     rich_markup_mode="rich",
-    no_args_is_help=True,
-    add_completion=True,
+    no_args_is_help=False,  # Allow custom callback for no args
+    add_completion=False,   # Disabled for better cross-platform compatibility
+    context_settings={"help_option_names": ["-h", "--help"]},  # Enable -h support
 )
+
+
+@app.callback(invoke_without_command=True)
+def main(
+    ctx: typer.Context,
+):
+    """
+    Modular Test Configuration Manager
+    
+    A CLI tool for managing the modular test framework configuration.
+    Provides easy ways to add tests, modify weights, and validate configuration.
+    """
+    if ctx.invoked_subcommand is None:
+        console.print("[bold blue]Modular Test Configuration Manager[/bold blue]")
+        console.print("A CLI tool for managing the modular test framework configuration.")
+        console.print("\n[cyan]Available commands:[/cyan]")
+        console.print("  • [bold]list[/bold] - List all configured tests")
+        console.print("  • [bold]add[/bold] - Add a new test to the configuration")
+        console.print("  • [bold]update[/bold] - Update an existing test")
+        console.print("  • [bold]remove[/bold] - Remove a test from the configuration")
+        console.print("  • [bold]validate[/bold] - Validate the configuration for common issues")
+        console.print("  • [bold]show[/bold] - Show the full configuration file")
+        console.print("  • [bold]set-thresholds[/bold] - Set global thresholds for test scoring")
+        console.print("\n[green]Quick start:[/green] test_config_manager.py list")
+        console.print("[blue]For help:[/blue] test_config_manager.py --help")
+        return
 
 
 class TestConfigManager:
