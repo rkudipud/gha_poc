@@ -526,7 +526,7 @@ def commit_push(
         console=console,
     ) as progress:
         task = progress.add_task("Creating commit...", total=None)
-        commit_result = git_helper._run_command(['git', 'commit', '-m', message])
+        commit_result = git_helper._run_command(['git', 'commit', '-m', message], capture_output=False)
         progress.update(task, completed=100, description="Commit complete")
     
     if commit_result.returncode != 0:
@@ -542,7 +542,7 @@ def commit_push(
         console=console,
     ) as progress:
         task = progress.add_task("Pushing to remote...", total=None)
-        push_result = git_helper._run_command(['git', 'push', 'origin', current_branch])
+        push_result = git_helper._run_command(['git', 'push', 'origin', current_branch], capture_output=False)
         progress.update(task, completed=100, description="Push complete")
     
     if push_result.returncode == 0:
