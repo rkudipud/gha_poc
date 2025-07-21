@@ -568,7 +568,7 @@ def install_git_hooks(config: Dict[str, Any]) -> bool:
 # This hook runs consistency checks before pushing to remote repository
 
 echo "Running consistency checks..."
-python "{repo_root}/devops/consistency_checker/checker.py" run-all
+python "{repo_root}/devops/consistency_checker/checker.py" run-all -o consitency.html --format html
 
 if [ $? -ne 0 ]; then
   echo "❌ Consistency checks failed. Please fix issues before pushing."
