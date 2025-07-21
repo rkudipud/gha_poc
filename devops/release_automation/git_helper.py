@@ -774,21 +774,23 @@ def cleanup():
         # Ensure we're back on main branch
         git_helper._run_command(['git', 'checkout', main_branch])
         return
-    
+
     # Step 3: Display branches to be deleted with safety information
-    console.print(f"\n[yellow]Merged branches to delete ({len(merged_branches)}):[/yellow]")
+    console.print(f"\n[bold yellow]Merged branches to delete ({len(merged_branches)}):[/bold yellow]")
     for branch in merged_branches:
-        console.print(f"  • {branch}")
-    
+        console.print(f"  • [red]{branch}[/red]")
+
     console.print(f"\n[green]Protected branches (will NOT be deleted):[/green]")
     for protected in protected_branches:
         console.print(f"  • {protected}")
-    
+
     # Step 4: Confirm and delete branches
-    if Confirm.ask(f"\nDelete {len(merged_branches)} merged branches? (Protected branches will be preserved)"):
+    confirm_message = f"Are you sure you want to delete these {len(merged_branches)} branches? Type 'yes' to confirm."
+    user_confirm = Prompt.ask(confirm_message, choices=["yes", "no"], default="no")
+    if user_confirm == "yes":
         deleted_count = 0
         failed_count = 0
-        
+
         for branch in merged_branches:
             try:
                 # Delete local branch
@@ -796,24 +798,25 @@ def cleanup():
                 if local_result.returncode == 0:
                     deleted_count += 1
                     console.print(f"[green]✓ Deleted local branch: {branch}[/green]")
-                    
-                    # Delete remote branch (ignore errors if branch doesn't exist on remote)
+
+                    # Delete remote branch (fail if not deleted)
                     remote_result = git_helper._run_command(['git', 'push', 'origin', '--delete', branch])
                     if remote_result.returncode == 0:
                         console.print(f"[green]✓ Deleted remote branch: {branch}[/green]")
                     else:
-                        console.print(f"[yellow]⚠ Could not delete remote branch: {branch} (may not exist on remote)[/yellow]")
+                        failed_count += 1
+                        console.print(f"[red]✗ Failed to delete remote branch: {branch}[/red]")
                 else:
                     failed_count += 1
                     console.print(f"[red]✗ Failed to delete local branch: {branch}[/red]")
-                    
+
             except Exception as e:
                 failed_count += 1
                 console.print(f"[red]✗ Error deleting branch {branch}: {e}[/red]")
-        
+
         # Final sync and checkout to main
         git_helper._run_command(['git', 'checkout', main_branch])
-        
+
         if deleted_count > 0:
             git_helper._show_success(f"Cleaned up {deleted_count} merged branches")
         if failed_count > 0:
